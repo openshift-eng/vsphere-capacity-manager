@@ -3,29 +3,29 @@
 package versioned
 
 import (
-	"fmt"
-	"net/http"
-
-	ipamcontrollerv1 "github.com/rvanderp3/machine-ipam-controller/pkg/generated/clientset/versioned/typed/ipamcontroller.openshift.io/v1"
+	vsphere-capacity-managerv1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/generated/clientset/versioned/typed/vsphere-capacity-manager.splat-team.io/v1"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"
 )
 
+
 type Interface interface {
 	Discovery() discovery.DiscoveryInterface
-	IpamcontrollerV1() ipamcontrollerv1.IpamcontrollerV1Interface
+    Vsphere-capacity-managerV1() vsphere-capacity-managerv1.Vsphere-capacity-managerV1Interface
+	
 }
 
 // Clientset contains the clients for groups.
 type Clientset struct {
 	*discovery.DiscoveryClient
-	ipamcontrollerV1 *ipamcontrollerv1.IpamcontrollerV1Client
+    vsphere-capacity-managerV1 *vsphere-capacity-managerv1.Vsphere-capacity-managerV1Client
+    
 }
 
-// IpamcontrollerV1 retrieves the IpamcontrollerV1Client
-func (c *Clientset) IpamcontrollerV1() ipamcontrollerv1.IpamcontrollerV1Interface {
-	return c.ipamcontrollerV1
+// Vsphere-capacity-managerV1 retrieves the Vsphere-capacity-managerV1Client
+func (c *Clientset) Vsphere-capacity-managerV1() vsphere-capacity-managerv1.Vsphere-capacity-managerV1Interface {
+	return c.vsphere-capacity-managerV1
 }
 
 // Discovery retrieves the DiscoveryClient
@@ -37,7 +37,7 @@ func (c *Clientset) Discovery() discovery.DiscoveryInterface {
 }
 
 // NewForConfig creates a new Clientset for the given config.
-// If config's RateLimiter is not set and QPS and Burst are acceptable,
+// If config's RateLimiter is not set and QPS and Burst are acceptable, 
 // NewForConfig will generate a rate-limiter in configShallowCopy.
 // NewForConfig is equivalent to NewForConfigAndClient(c, httpClient),
 // where httpClient was generated with rest.HTTPClientFor(c).
@@ -72,13 +72,13 @@ func NewForConfigAndClient(c *rest.Config, httpClient *http.Client) (*Clientset,
 
 	var cs Clientset
 	var err error
-	cs.ipamcontrollerV1, err = ipamcontrollerv1.NewForConfigAndClient(&configShallowCopy, httpClient)
-	if err != nil {
+    cs.vsphere-capacity-managerV1, err =vsphere-capacity-managerv1.NewForConfigAndClient(&configShallowCopy, httpClient)
+	if err!=nil {
 		return nil, err
 	}
 
 	cs.DiscoveryClient, err = discovery.NewDiscoveryClientForConfigAndClient(&configShallowCopy, httpClient)
-	if err != nil {
+	if err!=nil {
 		return nil, err
 	}
 	return &cs, nil
@@ -88,7 +88,7 @@ func NewForConfigAndClient(c *rest.Config, httpClient *http.Client) (*Clientset,
 // panics if there is an error in the config.
 func NewForConfigOrDie(c *rest.Config) *Clientset {
 	cs, err := NewForConfig(c)
-	if err != nil {
+	if err!=nil {
 		panic(err)
 	}
 	return cs
@@ -97,7 +97,7 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 // New creates a new Clientset for the given RESTClient.
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
-	cs.ipamcontrollerV1 = ipamcontrollerv1.New(c)
+    cs.vsphere-capacity-managerV1 =vsphere-capacity-managerv1.New(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClient(c)
 	return &cs

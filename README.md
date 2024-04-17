@@ -1,121 +1,322 @@
-# machine-ipam-controller
+# vsphere-capacity-manager
 
 ## Overview
-An example of a controller which decorates machine resources with 
-nmstate state data.  
 
-## What does it do?
-This controller manages IPPools that are referenced by IPAddressClaims. 
-When an IPAddressClaim is created, this controller will validate that the
-claim contains a IPPoolRef that matches the kind `IPPool` and apigroup 
-`ipamcontroller.openshift.io`.  If the claim is a match, the controller
-will then verify that an IPPool with the specified name exists.  If the
-pool is found, the controller will request an IP from the IPPool, create
-an IPAddress for the assigned IP and update the `IPAddressClaim`'s status
-to have a reference to the created `IPAddress`.
+A scheduling layer on top of Boskos which aims to spread the load of jobs evenly among a pool
+of vCenters.
 
-## Why does this even exist?
-This project intends to provide a prototype of the concepts discussed in
-https://github.com/rvanderp3/enhancements/tree/static-ip-addresses-vsphere .  
+## Allocation Strategy
 
-For details on building the installer and machine API changes, see [DEV.md](./DEV.md).
+Be default, leases are assigned to the least utilized vCenter.
 
-## How do I configure it?
-Create a file called `ipam-config.yaml`.  This file defines the IP addresses for the
+## Deployment
+
+This service will be deployed on a managing OpenShift cluster.  Prow pods running on the managing cluster will access
+this service as a Kubernetes service.
+
+## Storing State
+
+State will be stored in configmap adjacent to the deployment.
+
+## Acquiring a Lease
+
+To acquire a lease(or leases), the desired resources are provided to the `acquire` API call.  A resource defines the number of required vCPUs, memory, and storage.  Additionally, vCenters specifies how many pools are needed.  The resource specification will apply to each pool.  If more than one vCenter is specified, the quantity of vCPUs, memory, and storage will be required for each vCenter.
+
+```sh
+curl --location --request POST 'http://localhost:8080/acquire' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "vcpus": 24,
+    "memory": 96,
+    "storage": 700,
+    "vcenters": 1
+}'
+```
+
+If the desired leases are acquired, the lease details are return.  While not shown below, the lease will also include the port group
+and details from subnet.json.
+
+```json
+[
+  {
+    "spec": {
+      "vcpus": 24,
+      "memory": 96,
+      "storage": 700,
+      "vcenters": 0
+    },
+    "status": {
+      "resources": [
+        {
+          "spec": {
+            "vcpus": 24,
+            "memory": 96,
+            "storage": 700,
+            "vcenters": 1
+          },
+          "status": {
+            "vcpus": 0,
+            "memory": 0,
+            "storage": 0,
+            "pool": "",
+            "lease": ""
+          },
+          "metadata": {
+            "creationTimestamp": null
+          },
+          "type": {}
+        }
+      ],
+      "leased-at": "2024-04-17 15:32:06.9265657 -0400 EDT m=+201.560691053",
+      "boskos-lease-id": "",
+      "pool": "pool1"
+    },
+    "metadata": {
+      "creationTimestamp": null
+    },
+    "type": {}
+  }
+]
+```
+
+### Getting Pools
+
+The allocation level of each pool can be retrieved by a call to show-pools.  The status will show
+any leases associated with the pool as well as the percentage of exhaustion for resources in the
 pool.
 
-~~~yaml
-apiVersion: ipamcontroller.openshift.io/v1
-kind: IPPool
-metadata:
-  name: testpool
-spec:
-  address-cidr: 192.168.101.248/29
-  prefix: 23
-  gateway: 192.168.100.1
-  nameserver:
-    - 8.8.8.8
-~~~
+Note: To reduce complexity, the individual vCenters are not being contacted to get real-time utilization
+metrics.  This could be done but I fear it would make this more brittle with little benefit.
 
-Most parameters are self-explanatory.  `address-cidr` defines the grouping of IP 
-address for the pool to maintain.   `prefix` defines the prefix for the subnet.
+```sh
+$ curl localhost:8080/show-pools
+```
 
-Note: Be careful when configuring gateways in dual stack configurations.  Enabling 
-gateways for both IPv4 and IPv6 may have undesired effects depending on which gateway
-provides connectivity to external networks.
+```json
+[
+  {
+    "spec": {
+      "vcpus": 120,
+      "memory": 1600,
+      "storage": 10000,
+      "vcenters": 0,
+      "name": "pool1",
+      "vcenter": "vcenter1",
+      "datacenter": "datacenter1",
+      "cluster": "cluster1",
+      "datastore": "datastore1",
+      "networks": null
+    },
+    "status": {
+      "vcpus-usage": 0.4,
+      "memory-usage": 0.12,
+      "datastore-usage": 0.14,
+      "leases": [
+        {
+          "spec": {
+            "vcpus": 24,
+            "memory": 96,
+            "storage": 700,
+            "vcenters": 0
+          },
+          "status": {
+            "resources": [
+              {
+                "spec": {
+                  "vcpus": 24,
+                  "memory": 96,
+                  "storage": 700,
+                  "vcenters": 1
+                },
+                "status": {
+                  "vcpus": 0,
+                  "memory": 0,
+                  "storage": 0,
+                  "pool": "",
+                  "lease": ""
+                },
+                "metadata": {
+                  "creationTimestamp": null
+                },
+                "type": {}
+              }
+            ],
+            "leased-at": "2024-04-17 15:28:48.135124729 -0400 EDT m=+2.769250092",
+            "boskos-lease-id": "",
+            "pool": "pool1"
+          },
+          "metadata": {
+            "creationTimestamp": null
+          },
+          "type": {}
+        },
+        {
+          "spec": {
+            "vcpus": 24,
+            "memory": 96,
+            "storage": 700,
+            "vcenters": 0
+          },
+          "status": {
+            "resources": [
+              {
+                "spec": {
+                  "vcpus": 24,
+                  "memory": 96,
+                  "storage": 700,
+                  "vcenters": 1
+                },
+                "status": {
+                  "vcpus": 0,
+                  "memory": 0,
+                  "storage": 0,
+                  "pool": "",
+                  "lease": ""
+                },
+                "metadata": {
+                  "creationTimestamp": null
+                },
+                "type": {}
+              }
+            ],
+            "leased-at": "2024-04-17 15:32:06.9265657 -0400 EDT m=+201.560691053",
+            "boskos-lease-id": "",
+            "pool": "pool1"
+          },
+          "metadata": {
+            "creationTimestamp": null
+          },
+          "type": {}
+        }
+      ],
+      "network-usage": 0
+    }
+  },
+  {
+    "spec": {
+      "vcpus": 60,
+      "memory": 800,
+      "storage": 5000,
+      "vcenters": 0,
+      "name": "pool2",
+      "vcenter": "vcenter2",
+      "datacenter": "datacenter2",
+      "cluster": "cluster2",
+      "datastore": "datastore2",
+      "networks": null
+    },
+    "status": {
+      "vcpus-usage": 0.4,
+      "memory-usage": 0.12,
+      "datastore-usage": 0.14,
+      "leases": [
+        {
+          "spec": {
+            "vcpus": 24,
+            "memory": 96,
+            "storage": 700,
+            "vcenters": 0
+          },
+          "status": {
+            "resources": [
+              {
+                "spec": {
+                  "vcpus": 24,
+                  "memory": 96,
+                  "storage": 700,
+                  "vcenters": 1
+                },
+                "status": {
+                  "vcpus": 0,
+                  "memory": 0,
+                  "storage": 0,
+                  "pool": "",
+                  "lease": ""
+                },
+                "metadata": {
+                  "creationTimestamp": null
+                },
+                "type": {}
+              }
+            ],
+            "leased-at": "2024-04-17 15:29:21.919057428 -0400 EDT m=+36.553182791",
+            "boskos-lease-id": "",
+            "pool": "pool2"
+          },
+          "metadata": {
+            "creationTimestamp": null
+          },
+          "type": {}
+        }
+      ],
+      "network-usage": 0
+    }
+  },
+  {
+    "spec": {
+      "vcpus": 40,
+      "memory": 600,
+      "storage": 1000,
+      "vcenters": 0,
+      "name": "pool3",
+      "vcenter": "vcenter3",
+      "datacenter": "datacenter3",
+      "cluster": "cluster3",
+      "datastore": "datastore3",
+      "networks": null
+    },
+    "status": {
+      "vcpus-usage": 0.6,
+      "memory-usage": 0.16,
+      "datastore-usage": 0.7,
+      "leases": [
+        {
+          "spec": {
+            "vcpus": 24,
+            "memory": 96,
+            "storage": 700,
+            "vcenters": 0
+          },
+          "status": {
+            "resources": [
+              {
+                "spec": {
+                  "vcpus": 24,
+                  "memory": 96,
+                  "storage": 700,
+                  "vcenters": 1
+                },
+                "status": {
+                  "vcpus": 0,
+                  "memory": 0,
+                  "storage": 0,
+                  "pool": "",
+                  "lease": ""
+                },
+                "metadata": {
+                  "creationTimestamp": null
+                },
+                "type": {}
+              }
+            ],
+            "leased-at": "2024-04-17 15:32:02.632067175 -0400 EDT m=+197.266192538",
+            "boskos-lease-id": "",
+            "pool": "pool3"
+          },
+          "metadata": {
+            "creationTimestamp": null
+          },
+          "type": {}
+        }
+      ],
+      "network-usage": 0
+    }
+  }
+]
+```
+## Edge Cases
 
-To define the IPAddressClaim in the Machineset, you can follow the following example:
-~~~yaml
-apiVersion: machine.openshift.io/v1beta1
-kind: MachineSet
-metadata:
-  name: static-machineset-worker
-  namespace: openshift-machine-api
-  labels:
-    machine.openshift.io/cluster-api-cluster: cluster
-spec:
-  replicas: 0
-  selector:
-    matchLabels:
-      machine.openshift.io/cluster-api-cluster: cluster
-      machine.openshift.io/cluster-api-machineset: static-machineset-worker
-  template:
-    metadata:
-      labels:
-        machine.openshift.io/cluster-api-cluster: cluster
-        machine.openshift.io/cluster-api-machine-role: worker
-        machine.openshift.io/cluster-api-machine-type: worker
-        machine.openshift.io/cluster-api-machineset: static-machineset-worker
-    spec:
-      metadata: {}
-      providerSpec:
-        value:
-          numCoresPerSocket: 4
-          diskGiB: 120
-          snapshot: ''
-          userDataSecret:
-            name: worker-user-data
-          memoryMiB: 16384
-          credentialsSecret:
-            name: vsphere-cloud-credentials
-          network:
-            devices:
-              - addressesFromPool:
-                  - group: 'ipamcontroller.openshift.io'
-                    name: testpool
-                    resource: 'IPPool'
-                nameservers:
-                  - 8.8.8.8
-                nameserver: 192.168.1.215
-                networkName: lab
-          metadata:
-            creationTimestamp: null
-          numCPUs: 4
-          kind: VSphereMachineProviderSpec
-          workspace:
-            datacenter: datacenter
-            datastore: datastore
-            folder: /datacenter/vm/folder
-            resourcePool: /datacenter/host/cluster/Resources
-            server: vcenter.test.net
-          template: cluster-rhcos
-          apiVersion: machine.openshift.io/v1beta1
-~~~
+### A job takes too long to complete
 
-As the `machineset` is scaled, `machines` are created with the `addressFromPool` 
-which will be a reference to the IPPool to get an IP address from.
-
-## How do I build it?
-
-~~~
-go mod vendor
-go mod tidy
-./hack/build.sh
-~~~
-
-## How do I run it?
-
-~~~
-export KUBECONFIG=path/to/kubeconfig
-./bin/mapi-static-ip-controller
-~~~
+In this scenario, Boskos will trigger a shutdown of the job via Prow.  One of the final steps that is executed will
+release the leases.  If a lease hangs around for 24 hours, that lease will be reaped.

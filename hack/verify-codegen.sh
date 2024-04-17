@@ -2,7 +2,7 @@
 
 if [ "$IS_CONTAINER" != "" ]; then
   set -xe
-  go generate ./pkg/apis/ipamcontroller.openshift.io/install.go
+  go generate ./pkg/apis/vsphere-capacity-manager.splat-team.io/install.go
   set +ex
   # git diff --exit-code
 else

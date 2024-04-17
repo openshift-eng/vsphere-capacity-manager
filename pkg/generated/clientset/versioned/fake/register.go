@@ -3,20 +3,21 @@
 package fake
 
 import (
-	ipamcontrollerv1 "github.com/rvanderp3/machine-ipam-controller/pkg/apis/ipamcontroller.openshift.io/v1"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	vsphere-capacity-managerv1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vsphere-capacity-manager.splat-team.io/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	serializer "k8s.io/apimachinery/pkg/runtime/serializer"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 )
+
 
 var scheme = runtime.NewScheme()
 var codecs = serializer.NewCodecFactory(scheme)
 
 var localSchemeBuilder = runtime.SchemeBuilder{
-	ipamcontrollerv1.AddToScheme,
-}
+	vsphere-capacity-managerv1.AddToScheme,
+	}
 
 // AddToScheme adds all types of this clientset into the given scheme. This allows composition
 // of clientsets, like in:

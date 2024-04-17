@@ -3,15 +3,16 @@
 package fake
 
 import (
-	clientset "github.com/rvanderp3/machine-ipam-controller/pkg/generated/clientset/versioned"
-	ipamcontrollerv1 "github.com/rvanderp3/machine-ipam-controller/pkg/generated/clientset/versioned/typed/ipamcontroller.openshift.io/v1"
-	fakeipamcontrollerv1 "github.com/rvanderp3/machine-ipam-controller/pkg/generated/clientset/versioned/typed/ipamcontroller.openshift.io/v1/fake"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
 	fakediscovery "k8s.io/client-go/discovery/fake"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
+	vsphere-capacity-managerv1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/generated/clientset/versioned/typed/vsphere-capacity-manager.splat-team.io/v1"
+	fakevsphere-capacity-managerv1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/generated/clientset/versioned/typed/vsphere-capacity-manager.splat-team.io/v1/fake"
+	clientset "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/generated/clientset/versioned"
 	"k8s.io/client-go/testing"
 )
+
 
 // NewSimpleClientset returns a clientset that will respond with the provided objects.
 // It's backed by a very simple object tracker that processes creates, updates and deletions as-is,
@@ -47,7 +48,7 @@ func NewSimpleClientset(objects ...runtime.Object) *Clientset {
 type Clientset struct {
 	testing.Fake
 	discovery *fakediscovery.FakeDiscovery
-	tracker   testing.ObjectTracker
+	tracker testing.ObjectTracker
 }
 
 func (c *Clientset) Discovery() discovery.DiscoveryInterface {
@@ -63,7 +64,7 @@ var (
 	_ testing.FakeClient  = &Clientset{}
 )
 
-// IpamcontrollerV1 retrieves the IpamcontrollerV1Client
-func (c *Clientset) IpamcontrollerV1() ipamcontrollerv1.IpamcontrollerV1Interface {
-	return &fakeipamcontrollerv1.FakeIpamcontrollerV1{Fake: &c.Fake}
+// Vsphere-capacity-managerV1 retrieves the Vsphere-capacity-managerV1Client
+func (c *Clientset) Vsphere-capacity-managerV1() vsphere-capacity-managerv1.Vsphere-capacity-managerV1Interface {
+	return &fakevsphere-capacity-managerv1.FakeVsphere-capacity-managerV1{Fake: &c.Fake}
 }
