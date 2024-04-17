@@ -26,19 +26,16 @@ type ResourceSpec struct {
 	Storage int `json:"storage"`
 	// VCenters is the number of vCenters
 	VCenters int `json:"vcenters"`
+	// Networks is the number of networks requested
+	Networks int `json:"networks"`
 }
 
 type ResourceStatus struct {
-	// VCpus is the number of virtual CPUs
-	VCpus int `json:"vcpus"`
-	// Memory is the amount of memory in GB
-	Memory int `json:"memory"`
-	// Storage is the amount of storage in GB
-	Storage int `json:"storage"`
-	// Pool is the name of the pool associated with the resource
-	Pool string `json:"pool"`
-	// Lease is the name of the lease associated with the resource
-	Lease string `json:"lease"`
+	// Leases is the list of leases assigned to this resource
+	Lease Leases `json:"leases"`
+
+	// PortGroups is the list of port groups assigned to this resource
+	PortGroups []Network `json:"port-groups"`
 }
 
 // Resources is a list of resources

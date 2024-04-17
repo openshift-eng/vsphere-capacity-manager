@@ -12,18 +12,20 @@ func TestPoolCalculation(t *testing.T) {
 	calculateResourceUsage()
 	spew.Dump(Pools)
 
-	_, err := getPoolsWithStrategy(data.Resource{
+	_, err := getPoolsWithStrategy(&data.Resource{
 		Spec: data.ResourceSpec{
-			VCpus:   24,
-			Memory:  96,
-			Storage: 720,
+			VCpus:    24,
+			Memory:   96,
+			Storage:  720,
+			Networks: 1,
+			VCenters: 1,
 		},
 	}, data.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
 	if err != nil {
 		t.Fatalf("error acquiring lease: %s", err)
 	}
 
-	leases, err := AcquireLease(data.Resource{
+	leases, err := AcquireLease(&data.Resource{
 		Spec: data.ResourceSpec{
 			VCpus:    24,
 			Memory:   96,

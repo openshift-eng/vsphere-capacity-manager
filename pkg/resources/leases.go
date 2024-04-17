@@ -17,7 +17,7 @@ func getLeaseName() string {
 	return suffix
 }
 
-func AcquireLease(resource data.Resource) (*data.Leases, error) {
+func AcquireLease(resource *data.Resource) (*data.Leases, error) {
 	mu.Lock()
 	defer mu.Unlock()
 	log.Printf("acquiring lease for resource: %v", resource)
@@ -32,18 +32,15 @@ func AcquireLease(resource data.Resource) (*data.Leases, error) {
 
 	leases := data.Leases{}
 	for idx, pool := range pools {
+		portGroups := pool.Status.PortGroups[:resource.Spec.Networks]
+		pools[idx].Status.PortGroups = pool.Status.PortGroups[resource.Spec.Networks:]
+		copy(resource.Status.PortGroups, portGroups)
+		pools[idx].Status.ActivePortGroups = append(pools[idx].Status.ActivePortGroups, portGroups...)
 		lease := &data.Lease{
-			Spec: data.LeaseSpec{
-				ResourceSpec: data.ResourceSpec{
-					VCpus:   resource.Spec.VCpus,
-					Memory:  resource.Spec.Memory,
-					Storage: resource.Spec.Storage,
-				},
-			},
 			Status: data.LeaseStatus{
-				LeasedAt:  time.Now().String(),
-				Pool:      pool.Spec.Name,
-				Resources: []data.Resource{resource},
+				LeasedAt: time.Now().String(),
+				Pool:     pool.Spec.Name,
+				Resource: resource,
 			},
 		}
 		pools[idx].Status.Leases = append(pools[idx].Status.Leases, lease)

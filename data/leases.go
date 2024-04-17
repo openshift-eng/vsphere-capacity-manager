@@ -9,10 +9,10 @@ type LeaseSpec struct {
 }
 
 type LeaseStatus struct {
-	Resources     []Resource `json:"resources"`
-	LeasedAt      string     `json:"leased-at"`
-	BoskosLeaseID string     `json:"boskos-lease-id"`
-	Pool          string     `json:"pool"`
+	Resource      *Resource `json:"resource"`
+	LeasedAt      string    `json:"leased-at"`
+	BoskosLeaseID string    `json:"boskos-lease-id"`
+	Pool          string    `json:"pool"`
 }
 
 type Lease struct {
