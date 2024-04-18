@@ -8,8 +8,8 @@ if [ "$IS_CONTAINER" != "" ]; then
 else
   podman run --rm \
     --env IS_CONTAINER=TRUE \
-    --volume "${PWD}:/go/src/github.com/openshift/machine-ipam-controller:z" \
-    --workdir /go/src/github.com/openshift/machine-ipam-controller \
+    --volume "${PWD}:/go/src/github.com/openshift/vsphere-capacity-manager:z" \
+    --workdir /go/src/github.com/openshift/vsphere-capacity-manager \
     docker.io/golang:1.18 \
     ./hack/verify-codegen.sh "${@}"
 fi

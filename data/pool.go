@@ -1,13 +1,16 @@
 package data
 
+import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 // Pool defines a pool of resources defined available for a given vCenter, cluster, and datacenter
 type Pool struct {
-	Spec   PoolSpec   `json:"spec"`
-	Status PoolStatus `json:"status"`
+	Spec              PoolSpec   `json:"spec"`
+	Status            PoolStatus `json:"status"`
+	metav1.ObjectMeta `json:"metadata"`
+	metav1.TypeMeta   `json:"type"`
 }
 type PoolSpec struct {
 	ResourceSpec
-	Name       string `json:"name"`
 	VCenter    string `json:"vcenter"`
 	Datacenter string `json:"datacenter"`
 	Cluster    string `json:"cluster"`
@@ -15,11 +18,11 @@ type PoolSpec struct {
 }
 
 type PoolStatus struct {
-	VCpusAvailable     float64   `json:"vcpus-usage"`
-	MemoryAvailable    float64   `json:"memory-usage"`
-	DatastoreAvailable float64   `json:"datastore-usage"`
+	VCpusAvailable     int       `json:"vcpus-usage"`
+	MemoryAvailable    int       `json:"memory-usage"`
+	DatastoreAvailable int       `json:"datastore-usage"`
 	Leases             Leases    `json:"leases"`
-	NetworkAvailable   float64   `json:"network-usage"`
+	NetworkAvailable   int       `json:"network-usage"`
 	PortGroups         []Network `json:"port-groups"`
 	ActivePortGroups   []Network `json:"active-port-groups"`
 }

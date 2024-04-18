@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/openshift-splat-team/vsphere-capacity-manager/data"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var (
@@ -18,8 +19,10 @@ var (
 
 func init() {
 	Pools = append(Pools, &data.Pool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pool1",
+		},
 		Spec: data.PoolSpec{
-			Name:       "pool1",
 			VCenter:    "vcs8e-vc.ocp2.dev.cluster.com",
 			Datacenter: "datacenter1",
 			Cluster:    "cluster1",
@@ -31,8 +34,10 @@ func init() {
 			},
 		}})
 	Pools = append(Pools, &data.Pool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pool2",
+		},
 		Spec: data.PoolSpec{
-			Name:       "pool1",
 			VCenter:    "v8c-2-vcenter.ocp2.dev.cluster.com",
 			Datacenter: "datacenter1",
 			Cluster:    "cluster1",
@@ -44,8 +49,10 @@ func init() {
 			},
 		}})
 	Pools = append(Pools, &data.Pool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pool3",
+		},
 		Spec: data.PoolSpec{
-			Name:       "pool2",
 			VCenter:    "vcenter.ibmc.devcluster.openshift.com",
 			Datacenter: "datacenter2",
 			Cluster:    "cluster2",
@@ -57,8 +64,10 @@ func init() {
 			},
 		}})
 	Pools = append(Pools, &data.Pool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pool4",
+		},
 		Spec: data.PoolSpec{
-			Name:       "pool3",
 			VCenter:    "vcenter.devqe.ibmc.devcluster.openshift.com",
 			Datacenter: "datacenter3",
 			Cluster:    "cluster3",
@@ -80,17 +89,17 @@ func calculateResourceUsage() {
 		pool.Status.DatastoreAvailable = 0
 		pool.Status.NetworkAvailable = 0
 		for _, lease := range pool.Status.Leases {
-			pool.Status.VCpusAvailable += float64(lease.Spec.ResourceSpec.VCpus)
-			pool.Status.MemoryAvailable += float64(lease.Spec.ResourceSpec.Memory)
-			pool.Status.DatastoreAvailable += float64(lease.Spec.ResourceSpec.Storage)
-			pool.Status.NetworkAvailable += float64(lease.Spec.ResourceSpec.Networks)
+			pool.Status.VCpusAvailable += lease.Spec.ResourceSpec.VCpus
+			pool.Status.MemoryAvailable += lease.Spec.ResourceSpec.Memory
+			pool.Status.DatastoreAvailable += lease.Spec.ResourceSpec.Storage
+			pool.Status.NetworkAvailable += lease.Spec.ResourceSpec.Networks
 		}
-		pool.Status.VCpusAvailable = float64(pool.Spec.VCpus) - pool.Status.VCpusAvailable
-		pool.Status.MemoryAvailable = float64(pool.Spec.Memory) - pool.Status.MemoryAvailable
-		pool.Status.DatastoreAvailable = float64(pool.Spec.Storage) - pool.Status.DatastoreAvailable
-		pool.Status.NetworkAvailable = float64(len(pool.Status.PortGroups) - len(pool.Status.ActivePortGroups))
-		log.Printf("Pool %s Usage: vcpu-available: %f, memory-available: %f, storage-available: %f, network-available: %f",
-			pool.Spec.Name, pool.Status.VCpusAvailable, pool.Status.MemoryAvailable, pool.Status.DatastoreAvailable, pool.Status.NetworkAvailable)
+		pool.Status.VCpusAvailable = pool.Spec.VCpus - pool.Status.VCpusAvailable
+		pool.Status.MemoryAvailable = pool.Spec.Memory - pool.Status.MemoryAvailable
+		pool.Status.DatastoreAvailable = pool.Spec.Storage - pool.Status.DatastoreAvailable
+		pool.Status.NetworkAvailable = len(pool.Status.PortGroups)
+		log.Printf("Pool %s Usage: vcpu-available: %d, memory-available: %d, storage-available: %d, network-available: %d",
+			pool.ObjectMeta.Name, pool.Status.VCpusAvailable, pool.Status.MemoryAvailable, pool.Status.DatastoreAvailable, pool.Status.NetworkAvailable)
 	}
 }
 
