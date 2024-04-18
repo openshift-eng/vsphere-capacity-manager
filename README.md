@@ -5,6 +5,8 @@
 A scheduling layer on top of Boskos which aims to spread the load of jobs evenly among a pool
 of vCenters.
 
+![overview](/doc/vSphere%20Resource%20Manager.png)
+
 ## Allocation Strategy
 
 Be default, leases are assigned to the least utilized vCenter.

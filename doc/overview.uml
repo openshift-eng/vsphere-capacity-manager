@@ -1,0 +1,10 @@
+title vSphere Resource Manager
+
+Prow->Boskos: Allocate Boskos Lease
+Boskos->Prow: 
+Prow->Workflow: Start Prow Workflow
+Workflow->Resource Manager: Get Lease(s)\nfrom resource manager
+Resource Manager->Workflow:
+Workflow->Workflow: Configure Job State\nwith Leased Resources
+Workflow->Workflow: Execute Job
+Workflow->Resource Manager: Release Resources
