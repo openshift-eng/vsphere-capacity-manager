@@ -18,6 +18,8 @@ type LeaseStatus struct {
 	PortGroups    []Network `json:"port-groups"`
 }
 
+// Lease defines the resource requirements for a CI job. When fulfilled,
+// the lease is assigned to a pool and the resources are assigned to the lease.
 type Lease struct {
 	Spec              LeaseSpec   `json:"spec"`
 	Status            LeaseStatus `json:"status"`
