@@ -11,10 +11,18 @@ type Pool struct {
 }
 type PoolSpec struct {
 	ResourceSpec
-	VCenter    string `json:"vcenter"`
+	// Server the server that provisions resources for the pool
+	Server    string `json:"server"`
+	// Datacenter associated with this pool
 	Datacenter string `json:"datacenter"`
+	// Cluster cluster associated with this pool
 	Cluster    string `json:"cluster"`
+	// Datastore datastore associated with this pool
 	Datastore  string `json:"datastore"`
+	// Exclude when true, this pool is excluded from the default pools.
+	// This is useful if a job must be scheduled to a specific pool and that
+	// pool only has limited capacity.
+	Exclude    bool `json:"exclude`
 }
 
 type PoolStatus struct {

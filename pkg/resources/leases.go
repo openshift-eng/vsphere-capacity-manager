@@ -47,7 +47,7 @@ func ReleaseLease(leases *data.Leases) error {
 }
 
 // AcquireLease acquires a lease(or leases) for a resource
-func AcquireLease(resource *data.Resource) (*data.Leases, error) {
+func AcquireLease(lease *data.Lease) (*data.Leases, error) {
 	mu.Lock()
 	defer mu.Unlock()
 	log.Printf("acquiring lease for resource: %v", resource)

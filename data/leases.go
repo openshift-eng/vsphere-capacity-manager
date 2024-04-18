@@ -6,6 +6,9 @@ import (
 
 type LeaseSpec struct {
 	ResourceSpec
+	// RequiredPool when configured, this lease can only be
+	// scheduled in the required pool.
+	RequiredPool string `json:"required-pool"`
 }
 
 type LeaseStatus struct {
