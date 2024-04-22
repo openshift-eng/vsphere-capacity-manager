@@ -358,15 +358,16 @@ func crdsFromDirectory(ctx *genall.GenerationContext, dir string) (map[schema.Gr
 		if err := kyaml.Unmarshal(rawContent, &typeMeta); err != nil {
 			continue
 		}
-
-		if typeMeta.APIVersion == "" || typeMeta.Kind != "CustomResourceDefinition" {
-			// If there's no API version this file probably isn't a CRD.
-			// Likewise we don't need to care if the Kind isn't CustomResourceDefinition.
+		if !isSupportedAPIExtGroupVer(typeMeta.APIVersion) {
+			return nil, fmt.Errorf("load %q: apiVersion %q not supported", filepath.Join(dir, fileInfo.Name()), typeMeta.APIVersion)
+		}
+		if typeMeta.Kind != "CustomResourceDefinition" {
 			continue
 		}
 
-		if !isSupportedAPIExtGroupVer(typeMeta.APIVersion) {
-			return nil, fmt.Errorf("load %q: apiVersion %q not supported", filepath.Join(dir, fileInfo.Name()), typeMeta.APIVersion)
+		// this is a patch that allows us to skip manifests to support things like TechPreviewNoUpgrade manifests.
+		if !mayHandleFile(fileInfo.Name(), rawContent) {
+			continue
 		}
 
 		// collect the group-kind and versions from the actual structured form
