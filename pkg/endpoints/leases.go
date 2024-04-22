@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/openshift-splat-team/vsphere-capacity-manager/data"
+	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/resources"
 )
 
@@ -17,7 +17,7 @@ func init() {
 }
 
 func releaseLeaseHandler(w http.ResponseWriter, r *http.Request) {
-	var res data.Resource
+	var res v1.ResourceRequest
 	err := json.NewDecoder(r.Body).Decode(&res)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -26,13 +26,13 @@ func releaseLeaseHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func acquireLeaseHandler(w http.ResponseWriter, r *http.Request) {
-	var res data.ResourceSpec
+	var res v1.ResourceRequest
 	err := json.NewDecoder(r.Body).Decode(&res)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	leases, err := resources.AcquireLease(&data.Resource{Spec: res})
+	leases, err := resources.AcquireLease(res)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

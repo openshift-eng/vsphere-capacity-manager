@@ -1,0 +1,387 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.11.1
+  creationTimestamp: null
+  name: pools.vspherecapacitymanager.splat.io
+spec:
+  group: vspherecapacitymanager.splat.io
+  names:
+    kind: Pool
+    listKind: PoolList
+    plural: pools
+    singular: pool
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: Pool defines a pool of resources defined available for a given
+          vCenter, cluster, and datacenter
+        properties:
+          metadata:
+            type: object
+          spec:
+            properties:
+              cluster:
+                description: Cluster cluster associated with this pool
+                type: string
+              datacenter:
+                description: Datacenter associated with this pool
+                type: string
+              datastore:
+                description: Datastore datastore associated with this pool
+                type: string
+              exclude:
+                description: Exclude when true, this pool is excluded from the default
+                  pools. This is useful if a job must be scheduled to a specific pool
+                  and that pool only has limited capacity.
+                type: boolean
+              memory:
+                description: Memory is the amount of memory in GB
+                type: integer
+              networks:
+                description: Networks is the number of networks requested
+                type: integer
+              required-pool:
+                description: RequiredPool when configured, this lease can only be
+                  scheduled in the required pool.
+                type: string
+              server:
+                description: Server the server that provisions resources for the pool
+                type: string
+              storage:
+                description: Storage is the amount of storage in GB
+                type: integer
+              vcenters:
+                description: VCenters is the number of vCenters
+                type: integer
+              vcpus:
+                description: VCpus is the number of virtual CPUs
+                type: integer
+            required:
+            - cluster
+            - datacenter
+            - datastore
+            - exclude
+            - memory
+            - networks
+            - required-pool
+            - server
+            - storage
+            - vcenters
+            - vcpus
+            type: object
+          status:
+            properties:
+              active-port-groups:
+                description: ActivePortGroups is the list of port groups that are
+                  currently in use
+                items:
+                  properties:
+                    cidr:
+                      type: integer
+                    cidrIPv6:
+                      type: integer
+                    dhcpEndLocation:
+                      type: integer
+                    dnsServer:
+                      type: string
+                    gateway:
+                      type: string
+                    gatewayipv6:
+                      type: string
+                    ipAddresses:
+                      items:
+                        type: string
+                      type: array
+                    ipv6prefix:
+                      type: string
+                    linkLocalIPv6:
+                      type: string
+                    machineNetworkCidr:
+                      type: string
+                    mask:
+                      type: string
+                    network:
+                      type: string
+                    priority:
+                      type: integer
+                    startIPv6Address:
+                      type: string
+                    stopIPv6Address:
+                      type: string
+                    vifIPv6Address:
+                      type: string
+                    vifIpAddress:
+                      type: string
+                    virtualcenter:
+                      type: string
+                  required:
+                  - cidr
+                  - cidrIPv6
+                  - dhcpEndLocation
+                  - dnsServer
+                  - gateway
+                  - gatewayipv6
+                  - ipAddresses
+                  - ipv6prefix
+                  - linkLocalIPv6
+                  - machineNetworkCidr
+                  - mask
+                  - network
+                  - priority
+                  - startIPv6Address
+                  - stopIPv6Address
+                  - vifIPv6Address
+                  - vifIpAddress
+                  - virtualcenter
+                  type: object
+                type: array
+              datastore-available:
+                description: StorageAvailable is the amount of storage in GB available
+                  in the pool
+                type: integer
+              leases:
+                description: Leases is the list of leases assigned to this pool
+                items:
+                  description: Lease represents the definition of resources allocated
+                    for a resource pool
+                  properties:
+                    apiVersion:
+                      description: 'APIVersion defines the versioned schema of this
+                        representation of an object. Servers should convert recognized
+                        schemas to the latest internal value, and may reject unrecognized
+                        values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+                      type: string
+                    kind:
+                      description: 'Kind is a string value representing the REST resource
+                        this object represents. Servers may infer this from the endpoint
+                        the client submits requests to. Cannot be updated. In CamelCase.
+                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+                      type: string
+                    metadata:
+                      type: object
+                    spec:
+                      properties:
+                        memory:
+                          description: Memory is the amount of memory in GB
+                          type: integer
+                        networks:
+                          description: Networks is the number of networks requested
+                          type: integer
+                        required-pool:
+                          description: RequiredPool when configured, this lease can
+                            only be scheduled in the required pool.
+                          type: string
+                        storage:
+                          description: Storage is the amount of storage in GB
+                          type: integer
+                        vcenters:
+                          description: VCenters is the number of vCenters
+                          type: integer
+                        vcpus:
+                          description: VCpus is the number of virtual CPUs
+                          type: integer
+                      required:
+                      - memory
+                      - networks
+                      - required-pool
+                      - storage
+                      - vcenters
+                      - vcpus
+                      type: object
+                    status:
+                      description: status represents the current information/status
+                        for the IP pool. Populated by the system. Read-only.
+                      properties:
+                        boskos-lease-id:
+                          type: string
+                        leased-at:
+                          type: string
+                        pool:
+                          type: string
+                        port-groups:
+                          items:
+                            properties:
+                              cidr:
+                                type: integer
+                              cidrIPv6:
+                                type: integer
+                              dhcpEndLocation:
+                                type: integer
+                              dnsServer:
+                                type: string
+                              gateway:
+                                type: string
+                              gatewayipv6:
+                                type: string
+                              ipAddresses:
+                                items:
+                                  type: string
+                                type: array
+                              ipv6prefix:
+                                type: string
+                              linkLocalIPv6:
+                                type: string
+                              machineNetworkCidr:
+                                type: string
+                              mask:
+                                type: string
+                              network:
+                                type: string
+                              priority:
+                                type: integer
+                              startIPv6Address:
+                                type: string
+                              stopIPv6Address:
+                                type: string
+                              vifIPv6Address:
+                                type: string
+                              vifIpAddress:
+                                type: string
+                              virtualcenter:
+                                type: string
+                            required:
+                            - cidr
+                            - cidrIPv6
+                            - dhcpEndLocation
+                            - dnsServer
+                            - gateway
+                            - gatewayipv6
+                            - ipAddresses
+                            - ipv6prefix
+                            - linkLocalIPv6
+                            - machineNetworkCidr
+                            - mask
+                            - network
+                            - priority
+                            - startIPv6Address
+                            - stopIPv6Address
+                            - vifIPv6Address
+                            - vifIpAddress
+                            - virtualcenter
+                            type: object
+                          type: array
+                      required:
+                      - boskos-lease-id
+                      - leased-at
+                      - pool
+                      - port-groups
+                      type: object
+                  required:
+                  - spec
+                  type: object
+                type: array
+              memory-available:
+                description: MemoryAvailable is the amount of memory in GB available
+                  in the pool
+                type: integer
+              network-available:
+                description: Networks is the number of networks available in the pool
+                type: integer
+              port-groups:
+                description: PortGroups is the list of port groups available in the
+                  pool
+                items:
+                  properties:
+                    cidr:
+                      type: integer
+                    cidrIPv6:
+                      type: integer
+                    dhcpEndLocation:
+                      type: integer
+                    dnsServer:
+                      type: string
+                    gateway:
+                      type: string
+                    gatewayipv6:
+                      type: string
+                    ipAddresses:
+                      items:
+                        type: string
+                      type: array
+                    ipv6prefix:
+                      type: string
+                    linkLocalIPv6:
+                      type: string
+                    machineNetworkCidr:
+                      type: string
+                    mask:
+                      type: string
+                    network:
+                      type: string
+                    priority:
+                      type: integer
+                    startIPv6Address:
+                      type: string
+                    stopIPv6Address:
+                      type: string
+                    vifIPv6Address:
+                      type: string
+                    vifIpAddress:
+                      type: string
+                    virtualcenter:
+                      type: string
+                  required:
+                  - cidr
+                  - cidrIPv6
+                  - dhcpEndLocation
+                  - dnsServer
+                  - gateway
+                  - gatewayipv6
+                  - ipAddresses
+                  - ipv6prefix
+                  - linkLocalIPv6
+                  - machineNetworkCidr
+                  - mask
+                  - network
+                  - priority
+                  - startIPv6Address
+                  - stopIPv6Address
+                  - vifIPv6Address
+                  - vifIpAddress
+                  - virtualcenter
+                  type: object
+                type: array
+              vcpus-available:
+                description: VCPUsAvailable is the number of vCPUs available in the
+                  pool
+                type: integer
+            required:
+            - active-port-groups
+            - datastore-available
+            - leases
+            - memory-available
+            - network-available
+            - port-groups
+            - vcpus-available
+            type: object
+          type:
+            description: TypeMeta describes an individual object in an API response
+              or request with strings representing the type of the object and its
+              API schema version. Structures that are versioned or persisted should
+              inline TypeMeta.
+            properties:
+              apiVersion:
+                description: 'APIVersion defines the versioned schema of this representation
+                  of an object. Servers should convert recognized schemas to the latest
+                  internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+                type: string
+              kind:
+                description: 'Kind is a string value representing the REST resource
+                  this object represents. Servers may infer this from the endpoint
+                  the client submits requests to. Cannot be updated. In CamelCase.
+                  More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+                type: string
+            type: object
+        required:
+        - spec
+        - status
+        - metadata
+        - type
+        type: object
+    served: true
+    storage: true

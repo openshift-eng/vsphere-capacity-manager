@@ -3,24 +3,24 @@ package resources
 import (
 	"testing"
 
-	"github.com/openshift-splat-team/vsphere-capacity-manager/data"
+	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 )
 
 func TestGetPoolsWithStrategy(t *testing.T) {
 	t.Log("TestGetPoolsWithStrategy")
 
 	// Create mock pools
-	pools := data.Pools{
+	pools := v1.Pools{
 		{
-			Spec: data.PoolSpec{
-				ResourceSpec: data.ResourceSpec{
+			Spec: v1.PoolSpec{
+				ResourceRequestSpec: v1.ResourceRequestSpec{
 					VCpus:    24,
 					Memory:   96,
 					Storage:  720,
 					Networks: 1,
 				},
 			},
-			Status: data.PoolStatus{
+			Status: v1.PoolStatus{
 				VCpusAvailable:     24,
 				MemoryAvailable:    96,
 				DatastoreAvailable: 720,
@@ -28,8 +28,8 @@ func TestGetPoolsWithStrategy(t *testing.T) {
 			},
 		},
 		{
-			Spec: data.PoolSpec{
-				ResourceSpec: data.ResourceSpec{
+			Spec: v1.PoolSpec{
+				ResourceRequestSpec: v1.ResourceRequestSpec{
 					VCpus:    48,
 					Memory:   192,
 					Storage:  1440,
@@ -37,7 +37,7 @@ func TestGetPoolsWithStrategy(t *testing.T) {
 				},
 			},
 
-			Status: data.PoolStatus{
+			Status: v1.PoolStatus{
 				VCpusAvailable:     48,
 				MemoryAvailable:    192,
 				DatastoreAvailable: 1440,
@@ -51,14 +51,14 @@ func TestGetPoolsWithStrategy(t *testing.T) {
 
 	testcases := []struct {
 		name     string
-		expected data.Pools
-		resource *data.Resource
+		expected v1.Pools
+		resource *v1.ResourceRequest
 	}{
 		{
 			name: "single vCenter, single network, sized for 3 control plane nodes and 3 computes, should pass",
-			expected: data.Pools{
+			expected: v1.Pools{
 				{
-					Status: data.PoolStatus{
+					Status: v1.PoolStatus{
 						VCpusAvailable:     24,
 						MemoryAvailable:    96,
 						DatastoreAvailable: 720,
@@ -66,8 +66,8 @@ func TestGetPoolsWithStrategy(t *testing.T) {
 					},
 				},
 			},
-			resource: &data.Resource{
-				Spec: data.ResourceSpec{
+			resource: &v1.ResourceRequest{
+				Spec: v1.ResourceRequestSpec{
 					VCpus:    24,
 					Memory:   96,
 					Storage:  720,
@@ -78,9 +78,9 @@ func TestGetPoolsWithStrategy(t *testing.T) {
 		},
 		{
 			name: "single vCenter, single network, sized for 3 control plane nodes and 3 computes, should pass",
-			expected: data.Pools{
+			expected: v1.Pools{
 				{
-					Status: data.PoolStatus{
+					Status: v1.PoolStatus{
 						VCpusAvailable:     24,
 						MemoryAvailable:    96,
 						DatastoreAvailable: 720,
@@ -88,7 +88,7 @@ func TestGetPoolsWithStrategy(t *testing.T) {
 					},
 				},
 				{
-					Status: data.PoolStatus{
+					Status: v1.PoolStatus{
 						VCpusAvailable:     48,
 						MemoryAvailable:    192,
 						DatastoreAvailable: 1440,
@@ -96,8 +96,8 @@ func TestGetPoolsWithStrategy(t *testing.T) {
 					},
 				},
 			},
-			resource: &data.Resource{
-				Spec: data.ResourceSpec{
+			resource: &v1.ResourceRequest{
+				Spec: v1.ResourceRequestSpec{
 					VCpus:    24,
 					Memory:   96,
 					Storage:  720,
@@ -110,7 +110,7 @@ func TestGetPoolsWithStrategy(t *testing.T) {
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
-			pools, err := getPoolsWithStrategy(tc.resource, data.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
+			pools, err := getPoolsWithStrategy(&tc.resource.Spec, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
@@ -121,7 +121,7 @@ func TestGetPoolsWithStrategy(t *testing.T) {
 	}
 }
 
-func arePoolsEqual(pools1, pools2 data.Pools) bool {
+func arePoolsEqual(pools1, pools2 v1.Pools) bool {
 	if len(pools1) != len(pools2) {
 		return false
 	}
