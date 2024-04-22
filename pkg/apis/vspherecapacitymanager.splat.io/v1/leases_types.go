@@ -10,25 +10,36 @@ const (
 )
 
 // +genclient
-// +genclient:noStatus
-// +kubebuilder:subresource:status
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // Lease represents the definition of resources allocated for a resource pool
+// +k8s:openapi-gen=true
 // +kubebuilder:object:root=true
+// +kubebuilder:scope=Namespaced
+// +kubebuilder:subresource:status
 type Lease struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// +required
-	Spec LeaseSpec `json:"spec"`
-
-	// status represents the current information/status for the IP pool.
-	// Populated by the system.
-	// Read-only.
+	Spec LeaseSpec `json:"spec,omitempty"`
 	// +optional
 	Status LeaseStatus `json:"status,omitempty"`
 }
+
+// LeaseSpec defines the specification for a lease
+type LeaseSpec struct {
+	ResourceRequestSpec `json:",inline"`
+}
+
+// LeaseStatus defines the status for a lease
+type LeaseStatus struct {
+	LeasedAt      string    `json:"leased-at,omitempty"`
+	BoskosLeaseID string    `json:"boskos-lease-id,omitempty"`
+	Pool          string    `json:"pool,omitempty"`
+	PortGroups    []Network `json:"port-groups,omitempty"`
+}
+
+type Leases []*Lease
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type LeaseList struct {
@@ -37,17 +48,4 @@ type LeaseList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 
 	Items []Lease `json:"items"`
-}
-
-type Leases []*Lease
-
-type LeaseSpec struct {
-	ResourceRequestSpec `json:",inline"`
-}
-
-type LeaseStatus struct {
-	LeasedAt      string    `json:"leased-at"`
-	BoskosLeaseID string    `json:"boskos-lease-id"`
-	Pool          string    `json:"pool"`
-	PortGroups    []Network `json:"port-groups"`
 }

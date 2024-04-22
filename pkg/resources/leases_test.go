@@ -56,11 +56,9 @@ func constructTestPools(num int) v1.Pools {
 				Name: fmt.Sprintf("pool_%d", idx),
 			},
 			Spec: v1.PoolSpec{
-				ResourceRequestSpec: v1.ResourceRequestSpec{
-					VCpus:   24 * (idx + 1),
-					Memory:  96 * (idx + 1),
-					Storage: 720 * (idx + 1),
-				},
+				VCpus:   24 * (idx + 1),
+				Memory:  96 * (idx + 1),
+				Storage: 720 * (idx + 1),
 			},
 			Status: v1.PoolStatus{
 				VCpusAvailable:     24 * (idx + 1),

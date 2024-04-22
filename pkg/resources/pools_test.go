@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestGetPoolsWithStrategy(t *testing.T) {
@@ -12,13 +13,14 @@ func TestGetPoolsWithStrategy(t *testing.T) {
 	// Create mock pools
 	pools := v1.Pools{
 		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "pool1",
+			},
 			Spec: v1.PoolSpec{
-				ResourceRequestSpec: v1.ResourceRequestSpec{
-					VCpus:    24,
-					Memory:   96,
-					Storage:  720,
-					Networks: 1,
-				},
+				VCpus:    24,
+				Memory:   96,
+				Storage:  720,
+				Networks: 1,
 			},
 			Status: v1.PoolStatus{
 				VCpusAvailable:     24,
@@ -28,13 +30,35 @@ func TestGetPoolsWithStrategy(t *testing.T) {
 			},
 		},
 		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "pool2",
+			},
+
 			Spec: v1.PoolSpec{
-				ResourceRequestSpec: v1.ResourceRequestSpec{
-					VCpus:    48,
-					Memory:   192,
-					Storage:  1440,
-					Networks: 2,
-				},
+				VCpus:    48,
+				Memory:   192,
+				Storage:  1440,
+				Networks: 2,
+			},
+
+			Status: v1.PoolStatus{
+				VCpusAvailable:     48,
+				MemoryAvailable:    192,
+				DatastoreAvailable: 1440,
+				NetworkAvailable:   2,
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "zonal-pool1",
+			},
+
+			Spec: v1.PoolSpec{
+				VCpus:    48,
+				Memory:   192,
+				Storage:  1440,
+				Networks: 2,
+				Exclude:  true,
 			},
 
 			Status: v1.PoolStatus{

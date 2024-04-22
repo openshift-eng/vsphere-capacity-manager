@@ -1,5 +1,6 @@
 package v1
 
+// Network
 type Network struct {
 	Cidr               int      `json:"cidr"`
 	CidrIPv6           int      `json:"cidrIPv6"`

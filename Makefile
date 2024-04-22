@@ -68,6 +68,7 @@ test:
 .PHONY: generate
 generate: ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) paths=./... crd rbac:roleName=lease-perms output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) object paths=./...
 	go generate ./...
 	
 # Use podman to build the image.

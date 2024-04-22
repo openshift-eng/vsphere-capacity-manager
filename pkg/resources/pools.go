@@ -27,11 +27,9 @@ func init() {
 			Datacenter: "datacenter1",
 			Cluster:    "cluster1",
 			Datastore:  "datastore1",
-			ResourceRequestSpec: v1.ResourceRequestSpec{
-				VCpus:   120,
-				Memory:  1600,
-				Storage: 10000,
-			},
+			VCpus:      120,
+			Memory:     1600,
+			Storage:    10000,
 		}})
 	Pools = append(Pools, &v1.Pool{
 		ObjectMeta: metav1.ObjectMeta{
@@ -42,11 +40,10 @@ func init() {
 			Datacenter: "datacenter1",
 			Cluster:    "cluster1",
 			Datastore:  "datastore1",
-			ResourceRequestSpec: v1.ResourceRequestSpec{
-				VCpus:   120,
-				Memory:  1600,
-				Storage: 10000,
-			},
+
+			VCpus:   120,
+			Memory:  1600,
+			Storage: 10000,
 		}})
 	Pools = append(Pools, &v1.Pool{
 		ObjectMeta: metav1.ObjectMeta{
@@ -57,11 +54,9 @@ func init() {
 			Datacenter: "datacenter2",
 			Cluster:    "cluster2",
 			Datastore:  "datastore2",
-			ResourceRequestSpec: v1.ResourceRequestSpec{
-				VCpus:   60,
-				Memory:  800,
-				Storage: 5000,
-			},
+			VCpus:      60,
+			Memory:     800,
+			Storage:    5000,
 		}})
 	Pools = append(Pools, &v1.Pool{
 		ObjectMeta: metav1.ObjectMeta{
@@ -72,11 +67,9 @@ func init() {
 			Datacenter: "datacenter3",
 			Cluster:    "cluster3",
 			Datastore:  "datastore3",
-			ResourceRequestSpec: v1.ResourceRequestSpec{
-				VCpus:   40,
-				Memory:  600,
-				Storage: 1000,
-			},
+			VCpus:      40,
+			Memory:     600,
+			Storage:    1000,
 		}})
 	reconcileSubnets(Pools)
 }
@@ -118,6 +111,11 @@ func GetPools() v1.Pools {
 func getFittingPools(resource *v1.ResourceRequestSpec) v1.Pools {
 	var fittingPools v1.Pools
 	for _, pool := range Pools {
+		if pool.Spec.Exclude {
+			if len(resource.RequiredPool) == 0 || resource.RequiredPool != pool.ObjectMeta.Name {
+				continue
+			}
+		}
 		if int(pool.Status.VCpusAvailable) >= resource.VCpus &&
 			int(pool.Status.MemoryAvailable) >= resource.Memory &&
 			int(pool.Status.DatastoreAvailable) >= resource.Storage &&

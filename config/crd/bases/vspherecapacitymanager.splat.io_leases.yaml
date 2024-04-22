@@ -34,6 +34,7 @@ spec:
           metadata:
             type: object
           spec:
+            description: LeaseSpec defines the specification for a lease
             properties:
               memory:
                 description: Memory is the amount of memory in GB
@@ -63,8 +64,7 @@ spec:
             - vcpus
             type: object
           status:
-            description: status represents the current information/status for the
-              IP pool. Populated by the system. Read-only.
+            description: LeaseStatus defines the status for a lease
             properties:
               boskos-lease-id:
                 type: string
@@ -74,6 +74,7 @@ spec:
                 type: string
               port-groups:
                 items:
+                  description: Network
                   properties:
                     cidr:
                       type: integer
@@ -134,14 +135,7 @@ spec:
                   - virtualcenter
                   type: object
                 type: array
-            required:
-            - boskos-lease-id
-            - leased-at
-            - pool
-            - port-groups
             type: object
-        required:
-        - spec
         type: object
     served: true
     storage: true

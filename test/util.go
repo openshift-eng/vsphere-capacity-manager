@@ -1,32 +1,13 @@
 package test
 
 import (
-	"context"
-	"path/filepath"
-	"testing"
-
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-
-	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
-
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
-	"sigs.k8s.io/controller-runtime/pkg/envtest/komega"
 )
 
-var (
-	// specify testEnv configuration
-	testEnv    *envtest.Environment
-	cfg        *rest.Config
-	k8sClient  client.Client
-	testScheme *runtime.Scheme
-	ctx        = context.Background()
-	pools      = v1.PoolList{
+// getPools returns a list of pools for testing
+func getPools() *v1.PoolList {
+	return &v1.PoolList{
 		Items: []v1.Pool{
 			{
 				ObjectMeta: metav1.ObjectMeta{
@@ -98,42 +79,50 @@ var (
 			},
 		},
 	}
-)
-
-func TestLeases(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Leases Suite")
 }
 
-var _ = BeforeSuite(func() {
-	By("bootstrapping test environment")
+type shape int64
 
-	var err error
-	testEnv = &envtest.Environment{
-		CRDDirectoryPaths: []string{filepath.Join("..", "config", "crd", "bases")},
+const (
+	SHAPE_SMALL  = shape(1)
+	SHAPE_MEDIUM = shape(10)
+	SHAPE_LARGE  = shape(100)
+)
+
+type resourceRequest struct {
+	request v1.ResourceRequest
+}
+
+// getResourceRequest returns a ResourceRequest object for testing
+func GetResourceRequest() *resourceRequest {
+	return &resourceRequest{
+		request: v1.ResourceRequest{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "sample-request-0",
+				Namespace: "default",
+			},
+		},
 	}
+}
 
-	testScheme = scheme.Scheme
-	Expect(v1.Install(testScheme)).To(Succeed())
+func (r *resourceRequest) WithName(name string) *resourceRequest {
+	r.request.ObjectMeta.Name = name
+	return r
+}
 
-	cfg, err = testEnv.Start()
-	Expect(err).NotTo(HaveOccurred())
-	Expect(cfg).NotTo(BeNil())
+func (r *resourceRequest) WithShape(shape shape) *resourceRequest {
+	r.request.Spec.VCpus = int(16 * int64(shape))
+	r.request.Spec.Memory = int(16 * int64(shape))
+	r.request.Spec.Storage = int(120 * int64(shape))
+	r.request.Spec.Networks = int(1 * int64(shape))
+	return r
+}
 
-	//+kubebuilder:scaffold:scheme
+func (r *resourceRequest) WithPool(pool string) *resourceRequest {
+	r.request.Spec.RequiredPool = pool
+	return r
+}
 
-	k8sClient, err = client.New(cfg, client.Options{Scheme: testScheme})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(k8sClient).NotTo(BeNil())
-
-	for _, pool := range pools.Items {
-		Expect(k8sClient.Create(ctx, &pool)).To(Succeed())
-	}
-
-	komega.SetClient(k8sClient)
-	komega.SetContext(ctx)
-})
-
-var _ = AfterSuite(func() {
-	Expect(testEnv.Stop()).To(Succeed())
-})
+func (r *resourceRequest) Build() *v1.ResourceRequest {
+	return &r.request
+}

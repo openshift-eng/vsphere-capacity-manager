@@ -11,12 +11,21 @@ const (
 	RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED = AllocationStrategy("under-utilized")
 )
 
-// Resource defines the resource requirements for a CI job
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// ResourceRequest defines the resource requirements for a CI job
+// +k8s:openapi-gen=true
+// +kubebuilder:object:root=true
+// +kubebuilder:scope=Namespaced
+// +kubebuilder:subresource:status
 type ResourceRequest struct {
-	Spec              ResourceRequestSpec   `json:"spec"`
-	Status            ResourceRequestStatus `json:"status"`
-	metav1.ObjectMeta `json:"metadata"`
-	metav1.TypeMeta   `json:"type"`
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec ResourceRequestSpec `json:"spec"`
+	// +optional
+	Status ResourceRequestStatus `json:"status"`
 }
 
 type ResourceRequestSpec struct {
@@ -41,6 +50,15 @@ type ResourceRequestStatus struct {
 
 	// PortGroups is the list of port groups assigned to this resource
 	PortGroups []Network `json:"port-groups"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type ResourceRequestList struct {
+	metav1.TypeMeta `json:",inline"`
+	// +optional
+	metav1.ListMeta `json:"metadata,omitempty"`
+
+	Items []ResourceRequest `json:"items"`
 }
 
 // Resources is a list of resources
