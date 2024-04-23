@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -47,7 +48,7 @@ func ReleaseLease(leases *v1.Leases) error {
 }
 
 // AcquireLease acquires a lease(or leases) for a resource
-func AcquireLease(request v1.ResourceRequest) (*v1.Leases, error) {
+func AcquireLease(request *v1.ResourceRequest) (*v1.Leases, error) {
 	mu.Lock()
 	defer mu.Unlock()
 	resourceSpec := &request.Spec
@@ -56,7 +57,10 @@ func AcquireLease(request v1.ResourceRequest) (*v1.Leases, error) {
 
 	pools, err := getPoolsWithStrategy(resourceSpec, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
 	if err != nil {
-		return nil, fmt.Errorf("error acquiring lease: %s", err)
+		message := fmt.Sprintf("error acquiring lease: %v", err)
+		request.Status.Phase = v1.PHASE_PENDING
+		request.Status.State = v1.State(message)
+		return nil, errors.New(message)
 	}
 
 	log.Printf("available pools: %v", len(pools))
@@ -68,19 +72,24 @@ func AcquireLease(request v1.ResourceRequest) (*v1.Leases, error) {
 		pools[idx].Status.ActivePortGroups = append(pools[idx].Status.ActivePortGroups, portGroups...)
 		lease := &v1.Lease{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: getLeaseName(),
+				Name:      getLeaseName(),
+				Namespace: request.ObjectMeta.Namespace,
 			},
-			Spec: v1.LeaseSpec{
-				ResourceRequestSpec: *resourceSpec,
-			},
+			Spec: v1.LeaseSpec{},
 			Status: v1.LeaseStatus{
-				LeasedAt:   time.Now().String(),
+				LeasedAt:   metav1.Now().String(),
 				Pool:       pool.ObjectMeta.Name,
 				PortGroups: portGroups,
+				VCpus:      resourceSpec.VCpus,
+				Memory:     resourceSpec.Memory,
+				Storage:    resourceSpec.Storage,
 			},
 		}
 		pools[idx].Status.Leases = append(pools[idx].Status.Leases, lease)
 		leases = append(leases, lease)
 	}
+	request.Status.Lease = leases
+	request.Status.Phase = v1.PHASE_FULFILLED
+	request.Status.State = v1.State("lease acquired successfully")
 	return &leases, nil
 }

@@ -22,11 +22,11 @@ func compareSlices(slice1 []v1.PoolStatus, slice2 []v1.PoolStatus) bool {
 			slice1[i].NetworkAvailable != slice2[i].NetworkAvailable ||
 			len(slice1[i].PortGroups) != len(slice2[i].PortGroups) {
 			log.Printf("slice1 fields and slice2 fields are not the same")
-			log.Printf("VCpusAvailable: %d %d", slice1[i].VCpusAvailable, slice2[i].VCpusAvailable)
-			log.Printf("MemoryAvailable: %d %d", slice1[i].MemoryAvailable, slice2[i].MemoryAvailable)
-			log.Printf("DatastoreAvailable: %d %d", slice1[i].DatastoreAvailable, slice2[i].DatastoreAvailable)
-			log.Printf("NetworkAvailable: %d %d", slice1[i].NetworkAvailable, slice2[i].NetworkAvailable)
-			log.Printf("PortGroups length: %d %d", len(slice1[i].PortGroups), len(slice2[i].PortGroups))
+			log.Printf("VCpusAvailable: actual: %d expected: %d", slice1[i].VCpusAvailable, slice2[i].VCpusAvailable)
+			log.Printf("MemoryAvailable: actual: %d expected: %d", slice1[i].MemoryAvailable, slice2[i].MemoryAvailable)
+			log.Printf("DatastoreAvailable: actual: %d expected: %d", slice1[i].DatastoreAvailable, slice2[i].DatastoreAvailable)
+			log.Printf("NetworkAvailable: actual: %d expected: %d", slice1[i].NetworkAvailable, slice2[i].NetworkAvailable)
+			log.Printf("PortGroups length: actual: %d expected: %d", len(slice1[i].PortGroups), len(slice2[i].PortGroups))
 			return false
 		}
 
@@ -297,7 +297,7 @@ func TestAcquireLease(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			Pools = constructTestPools(2)
 
-			leases, err := AcquireLease(*tc.resource)
+			leases, err := AcquireLease(tc.resource)
 			if err != nil {
 				if len(tc.error) > 0 {
 					if err.Error() == tc.error {
@@ -323,11 +323,10 @@ func TestAcquireLease(t *testing.T) {
 
 			// check that leases have been granted their requested resources
 			for _, lease := range *leases {
-				if lease.Spec.ResourceRequestSpec.VCenters != tc.resource.Spec.VCenters ||
-					lease.Spec.ResourceRequestSpec.VCpus != tc.resource.Spec.VCpus ||
-					lease.Spec.ResourceRequestSpec.Memory != tc.resource.Spec.Memory ||
-					lease.Spec.ResourceRequestSpec.Storage != tc.resource.Spec.Storage ||
-					lease.Spec.ResourceRequestSpec.Networks != tc.resource.Spec.Networks ||
+				if len(*leases) != tc.resource.Spec.VCenters ||
+					lease.Status.VCpus != tc.resource.Spec.VCpus ||
+					lease.Status.Memory != tc.resource.Spec.Memory ||
+					lease.Status.Storage != tc.resource.Spec.Storage ||
 					len(lease.Status.PortGroups) != tc.resource.Spec.Networks {
 					t.Errorf("lease resource spec does not match the requested resource spec")
 				}
@@ -455,7 +454,7 @@ func TestReleaseLease(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			Pools = constructTestPools(2)
 
-			leases, err := AcquireLease(*tc.resource)
+			leases, err := AcquireLease(tc.resource)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}

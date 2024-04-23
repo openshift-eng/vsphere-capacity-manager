@@ -170,33 +170,6 @@ spec:
                       type: object
                     spec:
                       description: LeaseSpec defines the specification for a lease
-                      properties:
-                        memory:
-                          description: Memory is the amount of memory in GB
-                          type: integer
-                        networks:
-                          description: Networks is the number of networks requested
-                          type: integer
-                        required-pool:
-                          description: RequiredPool when configured, this lease can
-                            only be scheduled in the required pool.
-                          type: string
-                        storage:
-                          description: Storage is the amount of storage in GB
-                          type: integer
-                        vcenters:
-                          description: VCenters is the number of vCenters
-                          type: integer
-                        vcpus:
-                          description: VCpus is the number of virtual CPUs
-                          type: integer
-                      required:
-                      - memory
-                      - networks
-                      - required-pool
-                      - storage
-                      - vcenters
-                      - vcpus
                       type: object
                     status:
                       description: LeaseStatus defines the status for a lease
@@ -205,6 +178,10 @@ spec:
                           type: string
                         leased-at:
                           type: string
+                        memory:
+                          description: Memory is the amount of memory in GB allocated
+                            for this lease
+                          type: integer
                         pool:
                           type: string
                         port-groups:
@@ -270,6 +247,14 @@ spec:
                             - virtualcenter
                             type: object
                           type: array
+                        storage:
+                          description: Storage is the amount of storage in GB allocated
+                            for this lease
+                          type: integer
+                        vcpus:
+                          description: VCpus is the number of virtual CPUs allocated
+                            for this lease
+                          type: integer
                       type: object
                   type: object
                 type: array

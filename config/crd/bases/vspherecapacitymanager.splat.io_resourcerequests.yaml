@@ -33,11 +33,17 @@ spec:
           metadata:
             type: object
           spec:
+            description: ResourceRequestSpec defines the specification for a resource
+              request
             properties:
               memory:
-                description: Memory is the amount of memory in GB
+                default: 96
+                description: Memory is the amount of memory in GB defaults to 96 which
+                  is a typical memory consumption for a 3 control plane node cluster
+                  with 3 compute nodes.
                 type: integer
               networks:
+                default: 1
                 description: Networks is the number of networks requested
                 type: integer
               required-pool:
@@ -45,21 +51,21 @@ spec:
                   scheduled in the required pool.
                 type: string
               storage:
-                description: Storage is the amount of storage in GB
+                default: 720
+                description: Storage is the amount of storage in GB defaults to 720
+                  which is a typical storage consumption for a 3 control plane node
+                  cluster with 3 compute nodes.
                 type: integer
               vcenters:
+                default: 1
                 description: VCenters is the number of vCenters
                 type: integer
               vcpus:
-                description: VCpus is the number of virtual CPUs
+                default: 24
+                description: VCpus is the number of virtual CPUs defaults to 24 which
+                  is a typical vCPU count for a 3 control plane node cluster with
+                  3 compute nodes.
                 type: integer
-            required:
-            - memory
-            - networks
-            - required-pool
-            - storage
-            - vcenters
-            - vcpus
             type: object
           status:
             properties:
@@ -85,33 +91,6 @@ spec:
                       type: object
                     spec:
                       description: LeaseSpec defines the specification for a lease
-                      properties:
-                        memory:
-                          description: Memory is the amount of memory in GB
-                          type: integer
-                        networks:
-                          description: Networks is the number of networks requested
-                          type: integer
-                        required-pool:
-                          description: RequiredPool when configured, this lease can
-                            only be scheduled in the required pool.
-                          type: string
-                        storage:
-                          description: Storage is the amount of storage in GB
-                          type: integer
-                        vcenters:
-                          description: VCenters is the number of vCenters
-                          type: integer
-                        vcpus:
-                          description: VCpus is the number of virtual CPUs
-                          type: integer
-                      required:
-                      - memory
-                      - networks
-                      - required-pool
-                      - storage
-                      - vcenters
-                      - vcpus
                       type: object
                     status:
                       description: LeaseStatus defines the status for a lease
@@ -120,6 +99,10 @@ spec:
                           type: string
                         leased-at:
                           type: string
+                        memory:
+                          description: Memory is the amount of memory in GB allocated
+                            for this lease
+                          type: integer
                         pool:
                           type: string
                         port-groups:
@@ -185,77 +168,27 @@ spec:
                             - virtualcenter
                             type: object
                           type: array
+                        storage:
+                          description: Storage is the amount of storage in GB allocated
+                            for this lease
+                          type: integer
+                        vcpus:
+                          description: VCpus is the number of virtual CPUs allocated
+                            for this lease
+                          type: integer
                       type: object
                   type: object
                 type: array
-              port-groups:
-                description: PortGroups is the list of port groups assigned to this
-                  resource
-                items:
-                  description: Network
-                  properties:
-                    cidr:
-                      type: integer
-                    cidrIPv6:
-                      type: integer
-                    dhcpEndLocation:
-                      type: integer
-                    dnsServer:
-                      type: string
-                    gateway:
-                      type: string
-                    gatewayipv6:
-                      type: string
-                    ipAddresses:
-                      items:
-                        type: string
-                      type: array
-                    ipv6prefix:
-                      type: string
-                    linkLocalIPv6:
-                      type: string
-                    machineNetworkCidr:
-                      type: string
-                    mask:
-                      type: string
-                    network:
-                      type: string
-                    priority:
-                      type: integer
-                    startIPv6Address:
-                      type: string
-                    stopIPv6Address:
-                      type: string
-                    vifIPv6Address:
-                      type: string
-                    vifIpAddress:
-                      type: string
-                    virtualcenter:
-                      type: string
-                  required:
-                  - cidr
-                  - cidrIPv6
-                  - dhcpEndLocation
-                  - dnsServer
-                  - gateway
-                  - gatewayipv6
-                  - ipAddresses
-                  - ipv6prefix
-                  - linkLocalIPv6
-                  - machineNetworkCidr
-                  - mask
-                  - network
-                  - priority
-                  - startIPv6Address
-                  - stopIPv6Address
-                  - vifIPv6Address
-                  - vifIpAddress
-                  - virtualcenter
-                  type: object
-                type: array
+              phase:
+                description: Phase is the current phase of the resource request
+                type: string
+              state:
+                description: State is the current state of the resource request
+                type: string
             required:
             - leases
-            - port-groups
+            - phase
+            - state
             type: object
         required:
         - spec

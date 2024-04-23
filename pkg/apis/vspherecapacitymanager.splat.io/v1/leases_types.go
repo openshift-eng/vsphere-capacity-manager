@@ -27,12 +27,20 @@ type Lease struct {
 }
 
 // LeaseSpec defines the specification for a lease
-type LeaseSpec struct {
-	ResourceRequestSpec `json:",inline"`
-}
+type LeaseSpec struct{}
 
 // LeaseStatus defines the status for a lease
 type LeaseStatus struct {
+	// VCpus is the number of virtual CPUs allocated for this lease
+	// +optional
+	VCpus int `json:"vcpus,omitempty"`
+	// Memory is the amount of memory in GB allocated for this lease
+	// +optional
+	Memory int `json:"memory,omitempty"`
+	// Storage is the amount of storage in GB allocated for this lease
+	// +optional
+	Storage int `json:"storage,omitempty"`
+
 	LeasedAt      string    `json:"leased-at,omitempty"`
 	BoskosLeaseID string    `json:"boskos-lease-id,omitempty"`
 	Pool          string    `json:"pool,omitempty"`

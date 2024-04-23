@@ -82,10 +82,9 @@ func calculateResourceUsage() {
 		pool.Status.DatastoreAvailable = 0
 		pool.Status.NetworkAvailable = 0
 		for _, lease := range pool.Status.Leases {
-			pool.Status.VCpusAvailable += lease.Spec.ResourceRequestSpec.VCpus
-			pool.Status.MemoryAvailable += lease.Spec.ResourceRequestSpec.Memory
-			pool.Status.DatastoreAvailable += lease.Spec.ResourceRequestSpec.Storage
-			pool.Status.NetworkAvailable += lease.Spec.ResourceRequestSpec.Networks
+			pool.Status.VCpusAvailable += lease.Status.VCpus
+			pool.Status.MemoryAvailable += lease.Status.Memory
+			pool.Status.DatastoreAvailable += lease.Status.Storage
 		}
 		pool.Status.VCpusAvailable = pool.Spec.VCpus - pool.Status.VCpusAvailable
 		pool.Status.MemoryAvailable = pool.Spec.Memory - pool.Status.MemoryAvailable

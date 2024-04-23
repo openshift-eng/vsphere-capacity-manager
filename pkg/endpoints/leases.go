@@ -32,7 +32,7 @@ func acquireLeaseHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	leases, err := resources.AcquireLease(res)
+	leases, err := resources.AcquireLease(&res)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
