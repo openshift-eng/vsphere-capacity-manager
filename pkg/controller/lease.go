@@ -60,7 +60,7 @@ func (l *LeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Set up API helpers from the manager.
 	l.Client = mgr.GetClient()
 	l.Scheme = mgr.GetScheme()
-	l.Recorder = mgr.GetEventRecorderFor("control-plane-machine-set-controller")
+	l.Recorder = mgr.GetEventRecorderFor("lease-controller")
 	l.RESTMapper = mgr.GetRESTMapper()
 
 	return nil
@@ -93,11 +93,36 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, fmt.Errorf("error acquiring lease: %w", err)
 	}
 
-	defer l.Client.Status().Update(ctx, resourceRequest)
+	defer l.Status().Update(ctx, resourceRequest)
 
-	for _, lease := range *leases {
-		if err := l.Client.Create(ctx, lease); err != nil {
+	for idx, lease := range leases {
+		status := lease.Status.DeepCopy()
+		if err := l.Create(ctx, &lease); err != nil {
 			message := fmt.Sprintf("error creating lease: %v", err)
+			resourceRequest.Status.Phase = v1.PHASE_FAILED
+			resourceRequest.Status.State = v1.State(message)
+			return ctrl.Result{}, errors.New(message)
+		}
+		lease.Status = *status.DeepCopy()
+		if err := l.Status().Update(ctx, &lease); err != nil {
+			message := fmt.Sprintf("error updating lease status: %v", err)
+			resourceRequest.Status.Phase = v1.PHASE_FAILED
+			resourceRequest.Status.State = v1.State(message)
+			return ctrl.Result{}, errors.New(message)
+		}
+
+		resourceRequest.Status.Leases[idx].Name = lease.Name
+
+		pool := resources.GetPoolByName(lease.Status.Pool.Name)
+		if pool == nil {
+			message := fmt.Sprintf("error getting pool: %v", err)
+			resourceRequest.Status.Phase = v1.PHASE_FAILED
+			resourceRequest.Status.State = v1.State(message)
+			return ctrl.Result{}, errors.New(message)
+		}
+
+		if err := l.Status().Update(ctx, pool); err != nil {
+			message := fmt.Sprintf("error updating pool status: %v", err)
 			resourceRequest.Status.Phase = v1.PHASE_FAILED
 			resourceRequest.Status.State = v1.State(message)
 			return ctrl.Result{}, errors.New(message)

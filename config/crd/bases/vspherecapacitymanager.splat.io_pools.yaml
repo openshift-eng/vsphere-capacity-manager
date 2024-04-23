@@ -256,6 +256,8 @@ spec:
                             for this lease
                           type: integer
                       type: object
+                  required:
+                  - spec
                   type: object
                 type: array
               memory-available:

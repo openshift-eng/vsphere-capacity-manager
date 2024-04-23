@@ -115,6 +115,7 @@ func (r *resourceRequest) WithShape(shape shape) *resourceRequest {
 	r.request.Spec.Memory = int(16 * int64(shape))
 	r.request.Spec.Storage = int(120 * int64(shape))
 	r.request.Spec.Networks = int(1 * int64(shape))
+
 	return r
 }
 
@@ -124,5 +125,8 @@ func (r *resourceRequest) WithPool(pool string) *resourceRequest {
 }
 
 func (r *resourceRequest) Build() *v1.ResourceRequest {
+	if r.request.Spec.VCenters == 0 {
+		r.request.Spec.VCenters = 1
+	}
 	return &r.request
 }

@@ -1,6 +1,7 @@
 package v1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -21,9 +22,9 @@ type Lease struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec LeaseSpec `json:"spec,omitempty"`
+	Spec LeaseSpec `json:"spec"`
 	// +optional
-	Status LeaseStatus `json:"status,omitempty"`
+	Status LeaseStatus `json:"status"`
 }
 
 // LeaseSpec defines the specification for a lease
@@ -41,10 +42,17 @@ type LeaseStatus struct {
 	// +optional
 	Storage int `json:"storage,omitempty"`
 
-	LeasedAt      string    `json:"leased-at,omitempty"`
-	BoskosLeaseID string    `json:"boskos-lease-id,omitempty"`
-	Pool          string    `json:"pool,omitempty"`
-	PortGroups    []Network `json:"port-groups,omitempty"`
+	// Pool is the pool from which the lease was acquired
+	// +optional
+	Pool corev1.TypedLocalObjectReference `json:"pool,omitempty"`
+
+	// BoskosLeaseID is the ID of the lease in Boskos associated with this lease
+	// +optional
+	BoskosLeaseID string `json:"boskos-lease-id,omitempty"`
+
+	// PortGroups is the list of port groups associated with this lease
+	// +optional
+	PortGroups []Network `json:"port-groups,omitempty"`
 }
 
 type Leases []*Lease

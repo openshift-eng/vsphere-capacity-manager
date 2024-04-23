@@ -8,6 +8,8 @@ import (
 	"time"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
+
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -19,28 +21,33 @@ func getLeaseName() string {
 	return suffix
 }
 
-func ReleaseLease(leases *v1.Leases) error {
+func ReleaseLease(leases []v1.Lease) error {
 	mu.Lock()
 	defer mu.Unlock()
 	log.Printf("releasing lease: %v", leases)
 
-	for _, lease := range *leases {
-		for poolIdx, pool := range Pools { // search all pools for the leases
+	for _, lease := range leases {
+		for poolKey, pool := range Pools { // search all pools for the leases
 			for idx, l := range pool.Status.Leases {
 				if l.Name == lease.Name {
-					Pools[poolIdx].Status.Leases = append(Pools[poolIdx].Status.Leases[:idx], Pools[poolIdx].Status.Leases[idx+1:]...)
-					Pools[poolIdx].Status.PortGroups = append(Pools[poolIdx].Status.PortGroups, lease.Status.PortGroups...)
+					poolName := lease.Status.Pool.Name
+					pool.Status.Leases = append(Pools[poolName].Status.Leases[:idx], Pools[poolName].Status.Leases[idx+1:]...)
+					pool.Status.PortGroups = append(Pools[poolName].Status.PortGroups[:idx], Pools[poolName].Status.PortGroups[idx+1:]...)
+					//Pools[lease.Status.Pool.Name].Status.Leases = append(Pools[poolIdx].Status.Leases[:idx], Pools[poolIdx].Status.Leases[idx+1:]...)
+					//Pools[lease.Status.Pool.Name].Status.PortGroups = append(Pools[poolIdx].Status.PortGroups, lease.Status.PortGroups...)
 					newAvailable := []v1.Network{}
 					for _, pg := range lease.Status.PortGroups {
-						for _, activePortGroup := range Pools[poolIdx].Status.ActivePortGroups {
+						for _, activePortGroup := range pool.Status.ActivePortGroups {
 							if activePortGroup.Network != pg.Network {
 								newAvailable = append(newAvailable, pg)
 							}
 						}
 					}
-					Pools[poolIdx].Status.ActivePortGroups = newAvailable
+					pool.Status.ActivePortGroups = newAvailable
+					//Pools[lease.Status.Pool.Name].Status.ActivePortGroups = newAvailable
 				}
 			}
+			Pools[poolKey] = pool
 		}
 	}
 	calculateResourceUsage()
@@ -48,7 +55,7 @@ func ReleaseLease(leases *v1.Leases) error {
 }
 
 // AcquireLease acquires a lease(or leases) for a resource
-func AcquireLease(request *v1.ResourceRequest) (*v1.Leases, error) {
+func AcquireLease(request *v1.ResourceRequest) ([]v1.Lease, error) {
 	mu.Lock()
 	defer mu.Unlock()
 	resourceSpec := &request.Spec
@@ -65,20 +72,35 @@ func AcquireLease(request *v1.ResourceRequest) (*v1.Leases, error) {
 
 	log.Printf("available pools: %v", len(pools))
 
-	leases := v1.Leases{}
+	leases := []v1.Lease{}
 	for idx, pool := range pools {
 		portGroups := pool.Status.PortGroups[:resourceSpec.Networks]
 		pools[idx].Status.PortGroups = pool.Status.PortGroups[resourceSpec.Networks:]
 		pools[idx].Status.ActivePortGroups = append(pools[idx].Status.ActivePortGroups, portGroups...)
 		lease := &v1.Lease{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      getLeaseName(),
-				Namespace: request.ObjectMeta.Namespace,
+				GenerateName: "vsphere-lease-",
+				Namespace:    request.ObjectMeta.Namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: request.APIVersion,
+						Kind:       request.Kind,
+						Name:       request.ObjectMeta.Name,
+						UID:        request.ObjectMeta.UID,
+					},
+					{
+						APIVersion: v1.GroupVersion.Version,
+						Kind:       "Pool",
+						Name:       pool.ObjectMeta.Name,
+						UID:        pool.ObjectMeta.UID,
+					},
+				},
 			},
 			Spec: v1.LeaseSpec{},
 			Status: v1.LeaseStatus{
-				LeasedAt:   metav1.Now().String(),
-				Pool:       pool.ObjectMeta.Name,
+				Pool: corev1.TypedLocalObjectReference{
+					Name: pool.ObjectMeta.Name,
+				},
 				PortGroups: portGroups,
 				VCpus:      resourceSpec.VCpus,
 				Memory:     resourceSpec.Memory,
@@ -86,10 +108,15 @@ func AcquireLease(request *v1.ResourceRequest) (*v1.Leases, error) {
 			},
 		}
 		pools[idx].Status.Leases = append(pools[idx].Status.Leases, lease)
-		leases = append(leases, lease)
+		request.Status.Leases = append(request.Status.Leases, corev1.TypedLocalObjectReference{
+			Name:     lease.Name,
+			APIGroup: &v1.GroupVersion.Group,
+			Kind:     "Lease",
+		})
+		leases = append(leases, *lease)
 	}
-	request.Status.Lease = leases
+	//	request.Status.Leases = append(request.Status.Leases, leases...)
 	request.Status.Phase = v1.PHASE_FULFILLED
 	request.Status.State = v1.State("lease acquired successfully")
-	return &leases, nil
+	return leases, nil
 }

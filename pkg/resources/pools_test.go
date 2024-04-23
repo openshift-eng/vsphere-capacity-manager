@@ -11,7 +11,7 @@ func TestGetPoolsWithStrategy(t *testing.T) {
 	t.Log("TestGetPoolsWithStrategy")
 
 	// Create mock pools
-	pools := v1.Pools{
+	pools := []*v1.Pool{
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "pool1",
@@ -71,7 +71,10 @@ func TestGetPoolsWithStrategy(t *testing.T) {
 	}
 
 	// Set the global Pools variable to the mock pools
-	Pools = pools
+	//Pools = pools
+	for _, pool := range pools {
+		Pools[pool.Name] = pool
+	}
 
 	testcases := []struct {
 		name     string

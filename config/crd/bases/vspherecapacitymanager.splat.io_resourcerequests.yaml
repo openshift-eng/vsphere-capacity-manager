@@ -72,112 +72,27 @@ spec:
               leases:
                 description: Leases is the list of leases assigned to this resource
                 items:
-                  description: Lease represents the definition of resources allocated
-                    for a resource pool
+                  description: TypedLocalObjectReference contains enough information
+                    to let you locate the typed referenced object inside the same
+                    namespace.
                   properties:
-                    apiVersion:
-                      description: 'APIVersion defines the versioned schema of this
-                        representation of an object. Servers should convert recognized
-                        schemas to the latest internal value, and may reject unrecognized
-                        values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+                    apiGroup:
+                      description: APIGroup is the group for the resource being referenced.
+                        If APIGroup is not specified, the specified Kind must be in
+                        the core API group. For any other third-party types, APIGroup
+                        is required.
                       type: string
                     kind:
-                      description: 'Kind is a string value representing the REST resource
-                        this object represents. Servers may infer this from the endpoint
-                        the client submits requests to. Cannot be updated. In CamelCase.
-                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+                      description: Kind is the type of resource being referenced
                       type: string
-                    metadata:
-                      type: object
-                    spec:
-                      description: LeaseSpec defines the specification for a lease
-                      type: object
-                    status:
-                      description: LeaseStatus defines the status for a lease
-                      properties:
-                        boskos-lease-id:
-                          type: string
-                        leased-at:
-                          type: string
-                        memory:
-                          description: Memory is the amount of memory in GB allocated
-                            for this lease
-                          type: integer
-                        pool:
-                          type: string
-                        port-groups:
-                          items:
-                            description: Network
-                            properties:
-                              cidr:
-                                type: integer
-                              cidrIPv6:
-                                type: integer
-                              dhcpEndLocation:
-                                type: integer
-                              dnsServer:
-                                type: string
-                              gateway:
-                                type: string
-                              gatewayipv6:
-                                type: string
-                              ipAddresses:
-                                items:
-                                  type: string
-                                type: array
-                              ipv6prefix:
-                                type: string
-                              linkLocalIPv6:
-                                type: string
-                              machineNetworkCidr:
-                                type: string
-                              mask:
-                                type: string
-                              network:
-                                type: string
-                              priority:
-                                type: integer
-                              startIPv6Address:
-                                type: string
-                              stopIPv6Address:
-                                type: string
-                              vifIPv6Address:
-                                type: string
-                              vifIpAddress:
-                                type: string
-                              virtualcenter:
-                                type: string
-                            required:
-                            - cidr
-                            - cidrIPv6
-                            - dhcpEndLocation
-                            - dnsServer
-                            - gateway
-                            - gatewayipv6
-                            - ipAddresses
-                            - ipv6prefix
-                            - linkLocalIPv6
-                            - machineNetworkCidr
-                            - mask
-                            - network
-                            - priority
-                            - startIPv6Address
-                            - stopIPv6Address
-                            - vifIPv6Address
-                            - vifIpAddress
-                            - virtualcenter
-                            type: object
-                          type: array
-                        storage:
-                          description: Storage is the amount of storage in GB allocated
-                            for this lease
-                          type: integer
-                        vcpus:
-                          description: VCpus is the number of virtual CPUs allocated
-                            for this lease
-                          type: integer
-                      type: object
+                    name:
+                      description: Name is the name of resource being referenced
+                      type: string
+                  required:
+                  - kind
+                  - name
                   type: object
+                  x-kubernetes-map-type: atomic
                 type: array
               phase:
                 description: Phase is the current phase of the resource request
@@ -186,7 +101,6 @@ spec:
                 description: State is the current state of the resource request
                 type: string
             required:
-            - leases
             - phase
             - state
             type: object

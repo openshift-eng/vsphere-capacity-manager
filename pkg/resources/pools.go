@@ -8,70 +8,32 @@ import (
 	"sync"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var (
-	Pools  v1.Pools
+	Pools  map[string]*v1.Pool
 	Leases v1.Leases
 	mu     sync.Mutex
 )
 
-func init() {
-	Pools = append(Pools, &v1.Pool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "pool1",
-		},
-		Spec: v1.PoolSpec{
-			Server:     "vcs8e-vc.ocp2.dev.cluster.com",
-			Datacenter: "datacenter1",
-			Cluster:    "cluster1",
-			Datastore:  "datastore1",
-			VCpus:      120,
-			Memory:     1600,
-			Storage:    10000,
-		}})
-	Pools = append(Pools, &v1.Pool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "pool2",
-		},
-		Spec: v1.PoolSpec{
-			Server:     "v8c-2-vcenter.ocp2.dev.cluster.com",
-			Datacenter: "datacenter1",
-			Cluster:    "cluster1",
-			Datastore:  "datastore1",
+// GetPoolByName returns a pool by name
+func GetPoolByName(name string) *v1.Pool {
+	for _, pool := range Pools {
+		if pool.ObjectMeta.Name == name {
+			return pool
+		}
+	}
+	return nil
+}
 
-			VCpus:   120,
-			Memory:  1600,
-			Storage: 10000,
-		}})
-	Pools = append(Pools, &v1.Pool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "pool3",
-		},
-		Spec: v1.PoolSpec{
-			Server:     "vcenter.ibmc.devcluster.openshift.com",
-			Datacenter: "datacenter2",
-			Cluster:    "cluster2",
-			Datastore:  "datastore2",
-			VCpus:      60,
-			Memory:     800,
-			Storage:    5000,
-		}})
-	Pools = append(Pools, &v1.Pool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "pool4",
-		},
-		Spec: v1.PoolSpec{
-			Server:     "vcenter.devqe.ibmc.devcluster.openshift.com",
-			Datacenter: "datacenter3",
-			Cluster:    "cluster3",
-			Datastore:  "datastore3",
-			VCpus:      40,
-			Memory:     600,
-			Storage:    1000,
-		}})
-	reconcileSubnets(Pools)
+func AddPool(pool *v1.Pool) {
+	mu.Lock()
+	defer mu.Unlock()
+	if Pools == nil {
+		Pools = make(map[string]*v1.Pool)
+	}
+	ReconcileSubnets([]*v1.Pool{pool})
+	Pools[pool.ObjectMeta.Name] = pool
 }
 
 func calculateResourceUsage() {
@@ -95,13 +57,23 @@ func calculateResourceUsage() {
 	}
 }
 
+// GetPoolCount returns the number of pools
+func GetPoolCount() int {
+	mu.Lock()
+	defer mu.Unlock()
+
+	return len(Pools)
+}
+
 // GetPools returns a list of pools
-func GetPools() v1.Pools {
+func GetPools() []*v1.Pool {
 	mu.Lock()
 	defer mu.Unlock()
 	calculateResourceUsage()
-	pools := make(v1.Pools, len(Pools))
-	copy(pools, Pools)
+	pools := make([]*v1.Pool, len(Pools))
+	for _, pool := range Pools {
+		pools = append(pools, pool)
+	}
 	return pools
 }
 

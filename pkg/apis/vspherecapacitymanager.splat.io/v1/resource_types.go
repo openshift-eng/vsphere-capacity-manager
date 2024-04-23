@@ -1,6 +1,7 @@
 package v1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -71,7 +72,7 @@ type ResourceRequestSpec struct {
 
 type ResourceRequestStatus struct {
 	// Leases is the list of leases assigned to this resource
-	Lease Leases `json:"leases"`
+	Leases []corev1.TypedLocalObjectReference `json:"leases,omitempty"`
 
 	// Phase is the current phase of the resource request
 	Phase Phase `json:"phase"`

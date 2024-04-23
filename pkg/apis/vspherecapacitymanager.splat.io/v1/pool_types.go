@@ -18,7 +18,7 @@ type Pool struct {
 
 	Spec PoolSpec `json:"spec"`
 	// +optional
-	Status PoolStatus `json:"status,omitempty"`
+	Status PoolStatus `json:"status"`
 }
 
 // PoolSpec defines the specification for a pool

@@ -121,6 +121,8 @@ spec:
                   lease
                 type: integer
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true
