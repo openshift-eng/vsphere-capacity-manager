@@ -175,16 +175,36 @@ spec:
                       description: LeaseStatus defines the status for a lease
                       properties:
                         boskos-lease-id:
-                          type: string
-                        leased-at:
+                          description: BoskosLeaseID is the ID of the lease in Boskos
+                            associated with this lease
                           type: string
                         memory:
                           description: Memory is the amount of memory in GB allocated
                             for this lease
                           type: integer
                         pool:
-                          type: string
+                          description: Pool is the pool from which the lease was acquired
+                          properties:
+                            apiGroup:
+                              description: APIGroup is the group for the resource
+                                being referenced. If APIGroup is not specified, the
+                                specified Kind must be in the core API group. For
+                                any other third-party types, APIGroup is required.
+                              type: string
+                            kind:
+                              description: Kind is the type of resource being referenced
+                              type: string
+                            name:
+                              description: Name is the name of resource being referenced
+                              type: string
+                          required:
+                          - kind
+                          - name
+                          type: object
+                          x-kubernetes-map-type: atomic
                         port-groups:
+                          description: PortGroups is the list of port groups associated
+                            with this lease
                           items:
                             description: Network
                             properties:
