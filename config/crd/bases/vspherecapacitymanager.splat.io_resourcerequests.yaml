@@ -15,7 +15,23 @@ spec:
     singular: resourcerequest
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.vcpus
+      name: vCPUs
+      type: string
+    - jsonPath: .spec.memory
+      name: Memory(GB)
+      type: string
+    - jsonPath: .spec.storage
+      name: Storage(GB)
+      type: string
+    - jsonPath: .spec.vcenters
+      name: Pools
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    name: v1
     schema:
       openAPIV3Schema:
         description: ResourceRequest defines the resource requirements for a CI job

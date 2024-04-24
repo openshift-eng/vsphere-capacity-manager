@@ -1,8 +1,13 @@
 package test
 
 import (
+	"context"
+	"fmt"
+
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // getPools returns a list of pools for testing
@@ -129,4 +134,26 @@ func (r *resourceRequest) Build() *v1.ResourceRequest {
 		r.request.Spec.VCenters = 1
 	}
 	return &r.request
+}
+
+// IsLeaseReflectedInPool checks if the lease is reflected in the pool
+func IsLeaseReflectedInPool(ctx context.Context, client client.Client, lease *v1.Lease) (bool, error) {
+	if lease.Status.Pool == nil {
+		return false, fmt.Errorf("lease %s does not have an associated pool", lease.Name)
+	}
+	pool := &v1.Pool{}
+	if err := client.Get(ctx, types.NamespacedName{Name: lease.Status.Pool.Name, Namespace: lease.Namespace}, pool); err != nil {
+		return false, fmt.Errorf("error getting pool: %w", err)
+	}
+	for _, ref := range pool.Status.Leases {
+		if ref.Name == lease.Name {
+			if pool.Status.VCpusAvailable != pool.Spec.VCpus-lease.Spec.VCpus ||
+				pool.Status.MemoryAvailable != pool.Spec.Memory-lease.Spec.Memory ||
+				pool.Status.DatastoreAvailable != pool.Spec.Storage-lease.Spec.Storage ||
+				pool.Status.NetworkAvailable != pool.Spec.Networks-len(lease.Status.PortGroups) {
+				return false, nil
+			}
+		}
+	}
+	return false, nil
 }

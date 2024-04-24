@@ -15,7 +15,20 @@ spec:
     singular: pool
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - jsonPath: .status.vcpus-available
+      name: vCPUs
+      type: string
+    - jsonPath: .status.memory-available
+      name: Memory(GB)
+      type: string
+    - jsonPath: .status.datastore-available
+      name: Storage(GB)
+      type: string
+    - jsonPath: .status.network-available
+      name: Networks
+      type: string
+    name: v1
     schema:
       openAPIV3Schema:
         description: Pool defines a pool of resources defined available for a given
@@ -151,134 +164,27 @@ spec:
               leases:
                 description: Leases is the list of leases assigned to this pool
                 items:
-                  description: Lease represents the definition of resources allocated
-                    for a resource pool
+                  description: TypedLocalObjectReference contains enough information
+                    to let you locate the typed referenced object inside the same
+                    namespace.
                   properties:
-                    apiVersion:
-                      description: 'APIVersion defines the versioned schema of this
-                        representation of an object. Servers should convert recognized
-                        schemas to the latest internal value, and may reject unrecognized
-                        values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+                    apiGroup:
+                      description: APIGroup is the group for the resource being referenced.
+                        If APIGroup is not specified, the specified Kind must be in
+                        the core API group. For any other third-party types, APIGroup
+                        is required.
                       type: string
                     kind:
-                      description: 'Kind is a string value representing the REST resource
-                        this object represents. Servers may infer this from the endpoint
-                        the client submits requests to. Cannot be updated. In CamelCase.
-                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+                      description: Kind is the type of resource being referenced
                       type: string
-                    metadata:
-                      type: object
-                    spec:
-                      description: LeaseSpec defines the specification for a lease
-                      type: object
-                    status:
-                      description: LeaseStatus defines the status for a lease
-                      properties:
-                        boskos-lease-id:
-                          description: BoskosLeaseID is the ID of the lease in Boskos
-                            associated with this lease
-                          type: string
-                        memory:
-                          description: Memory is the amount of memory in GB allocated
-                            for this lease
-                          type: integer
-                        pool:
-                          description: Pool is the pool from which the lease was acquired
-                          properties:
-                            apiGroup:
-                              description: APIGroup is the group for the resource
-                                being referenced. If APIGroup is not specified, the
-                                specified Kind must be in the core API group. For
-                                any other third-party types, APIGroup is required.
-                              type: string
-                            kind:
-                              description: Kind is the type of resource being referenced
-                              type: string
-                            name:
-                              description: Name is the name of resource being referenced
-                              type: string
-                          required:
-                          - kind
-                          - name
-                          type: object
-                          x-kubernetes-map-type: atomic
-                        port-groups:
-                          description: PortGroups is the list of port groups associated
-                            with this lease
-                          items:
-                            description: Network
-                            properties:
-                              cidr:
-                                type: integer
-                              cidrIPv6:
-                                type: integer
-                              dhcpEndLocation:
-                                type: integer
-                              dnsServer:
-                                type: string
-                              gateway:
-                                type: string
-                              gatewayipv6:
-                                type: string
-                              ipAddresses:
-                                items:
-                                  type: string
-                                type: array
-                              ipv6prefix:
-                                type: string
-                              linkLocalIPv6:
-                                type: string
-                              machineNetworkCidr:
-                                type: string
-                              mask:
-                                type: string
-                              network:
-                                type: string
-                              priority:
-                                type: integer
-                              startIPv6Address:
-                                type: string
-                              stopIPv6Address:
-                                type: string
-                              vifIPv6Address:
-                                type: string
-                              vifIpAddress:
-                                type: string
-                              virtualcenter:
-                                type: string
-                            required:
-                            - cidr
-                            - cidrIPv6
-                            - dhcpEndLocation
-                            - dnsServer
-                            - gateway
-                            - gatewayipv6
-                            - ipAddresses
-                            - ipv6prefix
-                            - linkLocalIPv6
-                            - machineNetworkCidr
-                            - mask
-                            - network
-                            - priority
-                            - startIPv6Address
-                            - stopIPv6Address
-                            - vifIPv6Address
-                            - vifIpAddress
-                            - virtualcenter
-                            type: object
-                          type: array
-                        storage:
-                          description: Storage is the amount of storage in GB allocated
-                            for this lease
-                          type: integer
-                        vcpus:
-                          description: VCpus is the number of virtual CPUs allocated
-                            for this lease
-                          type: integer
-                      type: object
+                    name:
+                      description: Name is the name of resource being referenced
+                      type: string
                   required:
-                  - spec
+                  - kind
+                  - name
                   type: object
+                  x-kubernetes-map-type: atomic
                 type: array
               memory-available:
                 description: MemoryAvailable is the amount of memory in GB available

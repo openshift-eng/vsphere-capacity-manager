@@ -1,6 +1,7 @@
 package v1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -12,6 +13,10 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:scope=Namespaced
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="vCPUs",type=string,JSONPath=`.status.vcpus-available`
+// +kubebuilder:printcolumn:name="Memory(GB)",type=string,JSONPath=`.status.memory-available`
+// +kubebuilder:printcolumn:name="Storage(GB)",type=string,JSONPath=`.status.datastore-available`
+// +kubebuilder:printcolumn:name="Networks",type=string,JSONPath=`.status.network-available`
 type Pool struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -54,7 +59,7 @@ type PoolStatus struct {
 	// StorageAvailable is the amount of storage in GB available in the pool
 	DatastoreAvailable int `json:"datastore-available"`
 	// Leases is the list of leases assigned to this pool
-	Leases Leases `json:"leases"`
+	Leases []corev1.TypedLocalObjectReference `json:"leases"`
 	// Networks is the number of networks available in the pool
 	NetworkAvailable int `json:"network-available"`
 	// PortGroups is the list of port groups available in the pool

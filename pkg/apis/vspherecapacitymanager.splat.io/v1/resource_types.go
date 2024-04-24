@@ -27,6 +27,11 @@ type State string
 // +kubebuilder:object:root=true
 // +kubebuilder:scope=Namespaced
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="vCPUs",type=string,JSONPath=`.spec.vcpus`
+// +kubebuilder:printcolumn:name="Memory(GB)",type=string,JSONPath=`.spec.memory`
+// +kubebuilder:printcolumn:name="Storage(GB)",type=string,JSONPath=`.spec.storage`
+// +kubebuilder:printcolumn:name="Pools",type=string,JSONPath=`.spec.vcenters`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 type ResourceRequest struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

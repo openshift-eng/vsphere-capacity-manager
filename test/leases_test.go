@@ -52,6 +52,14 @@ var _ = Describe("Lease management", func() {
 		}
 		Expect(poolReconciler.SetupWithManager(mgr)).To(Succeed(), "Reconciler should be able to setup with manager")
 
+		resourceRequestReconciler := &controller.ResourceRequestReconciler{
+			Client:         mgr.GetClient(),
+			UncachedClient: mgr.GetClient(),
+			Namespace:      namespaceName,
+			OperatorName:   controllerName,
+		}
+		Expect(resourceRequestReconciler.SetupWithManager(mgr)).To(Succeed(), "Reconciler should be able to setup with manager")
+
 		leaseReconciler := &controller.LeaseReconciler{
 			Client:         mgr.GetClient(),
 			UncachedClient: mgr.GetClient(),
@@ -111,10 +119,17 @@ var _ = Describe("Lease management", func() {
 			}).Should(BeTrue())
 		})
 
+		leases := &v1.LeaseList{}
 		By("checking the lease", func() {
-			leases := &v1.LeaseList{}
 			Expect(k8sClient.List(ctx, leases, client.InNamespace(namespaceName))).To(Succeed())
 			Expect(leases.Items).To(HaveLen(1))
+
+			By("assoicated pool should reflect the resources claimed by the lease", func() {
+				Eventually(func() bool {
+					result, _ := IsLeaseReflectedInPool(ctx, k8sClient, &leases.Items[0])
+					return result
+				}).Should(BeTrue())
+			})
 		})
 	})
 })

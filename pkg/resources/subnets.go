@@ -9,7 +9,7 @@ import (
 )
 
 // ReconcileSubnets reconciles the subnets with the pools
-func ReconcileSubnets(pools v1.Pools) {
+func ReconcileSubnets(pools []*v1.Pool) {
 	subnetsContent, err := os.ReadFile("/home/rvanderp/code/vsphere-capacity-manager/subnets.json")
 	if err != nil {
 		log.Fatalf("error reading subnets.json: %s", err)
@@ -23,6 +23,9 @@ func ReconcileSubnets(pools v1.Pools) {
 
 	for idx, pool := range pools {
 		pools[idx].Status.PortGroups = []v1.Network{}
+		if pools[idx].Status.ActivePortGroups == nil {
+			pools[idx].Status.ActivePortGroups = []v1.Network{}
+		}
 		for _, datacenter := range subnets {
 			for _, network := range datacenter {
 				if pool.Spec.Server == network.Virtualcenter {

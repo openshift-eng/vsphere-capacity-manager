@@ -18,6 +18,10 @@ const (
 // +kubebuilder:object:root=true
 // +kubebuilder:scope=Namespaced
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="vCPUs",type=string,JSONPath=`.spec.vcpus`
+// +kubebuilder:printcolumn:name="Memory(GB)",type=string,JSONPath=`.spec.memory`
+// +kubebuilder:printcolumn:name="Storage(GB)",type=string,JSONPath=`.spec.storage`
+// +kubebuilder:printcolumn:name="Pool",type=string,JSONPath=`.status.pool.name`
 type Lease struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -28,23 +32,26 @@ type Lease struct {
 }
 
 // LeaseSpec defines the specification for a lease
-type LeaseSpec struct{}
+type LeaseSpec struct {
+	// VCpus is the number of virtual CPUs allocated for this lease
+	VCpus int `json:"vcpus,omitempty"`
+	// Memory is the amount of memory in GB allocated for this lease
+	Memory int `json:"memory,omitempty"`
+	// Storage is the amount of storage in GB allocated for this lease
+	Storage int `json:"storage,omitempty"`
+	// Networks is the number of networks requested
+	Networks int `json:"networks"`
+	// RequiredPool when configured, this lease can only be fulfilled by a specific
+	// pool
+	// +optional
+	RequiredPool string `json:"required-pool,omitempty"`
+}
 
 // LeaseStatus defines the status for a lease
 type LeaseStatus struct {
-	// VCpus is the number of virtual CPUs allocated for this lease
-	// +optional
-	VCpus int `json:"vcpus,omitempty"`
-	// Memory is the amount of memory in GB allocated for this lease
-	// +optional
-	Memory int `json:"memory,omitempty"`
-	// Storage is the amount of storage in GB allocated for this lease
-	// +optional
-	Storage int `json:"storage,omitempty"`
-
 	// Pool is the pool from which the lease was acquired
 	// +optional
-	Pool corev1.TypedLocalObjectReference `json:"pool,omitempty"`
+	Pool *corev1.TypedLocalObjectReference `json:"pool,omitempty"`
 
 	// BoskosLeaseID is the ID of the lease in Boskos associated with this lease
 	// +optional

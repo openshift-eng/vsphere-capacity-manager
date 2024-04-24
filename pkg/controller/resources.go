@@ -7,6 +7,7 @@ import (
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/resources"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -16,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-type LeaseReconciler struct {
+type ResourceRequestReconciler struct {
 	client.Client
 	Scheme         *runtime.Scheme
 	Recorder       record.EventRecorder
@@ -50,7 +51,7 @@ type lastErrorTracker struct {
 	count int
 }
 
-func (l *LeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (l *ResourceRequestReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := ctrl.NewControllerManagedBy(mgr).
 		For(&v1.ResourceRequest{}).
 		Complete(l); err != nil {
@@ -66,7 +67,7 @@ func (l *LeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return nil
 }
 
-func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (l *ResourceRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx, "namespace", req.Namespace, "name", req.Name)
 	logger.V(1).Info("Reconciling resource request")
 	defer logger.V(1).Info("Finished reconciling resource request")
@@ -88,46 +89,24 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
-	leases, err := resources.AcquireLease(resourceRequest)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("error acquiring lease: %w", err)
-	}
-
 	defer l.Status().Update(ctx, resourceRequest)
 
-	for idx, lease := range leases {
-		status := lease.Status.DeepCopy()
-		if err := l.Create(ctx, &lease); err != nil {
+	leases := resources.ConstructLeases(resourceRequest)
+
+	for _, lease := range leases {
+		if err := l.Create(ctx, lease); err != nil {
 			message := fmt.Sprintf("error creating lease: %v", err)
 			resourceRequest.Status.Phase = v1.PHASE_FAILED
 			resourceRequest.Status.State = v1.State(message)
 			return ctrl.Result{}, errors.New(message)
 		}
-		lease.Status = *status.DeepCopy()
-		if err := l.Status().Update(ctx, &lease); err != nil {
-			message := fmt.Sprintf("error updating lease status: %v", err)
-			resourceRequest.Status.Phase = v1.PHASE_FAILED
-			resourceRequest.Status.State = v1.State(message)
-			return ctrl.Result{}, errors.New(message)
-		}
 
-		resourceRequest.Status.Leases[idx].Name = lease.Name
-
-		pool := resources.GetPoolByName(lease.Status.Pool.Name)
-		if pool == nil {
-			message := fmt.Sprintf("error getting pool: %v", err)
-			resourceRequest.Status.Phase = v1.PHASE_FAILED
-			resourceRequest.Status.State = v1.State(message)
-			return ctrl.Result{}, errors.New(message)
-		}
-
-		if err := l.Status().Update(ctx, pool); err != nil {
-			message := fmt.Sprintf("error updating pool status: %v", err)
-			resourceRequest.Status.Phase = v1.PHASE_FAILED
-			resourceRequest.Status.State = v1.State(message)
-			return ctrl.Result{}, errors.New(message)
-		}
+		resourceRequest.Status.Leases = append(resourceRequest.Status.Leases, corev1.TypedLocalObjectReference{
+			Name: lease.Name,
+		})
 	}
+
+	resourceRequest.Status.Phase = v1.PHASE_FULFILLED
 
 	return ctrl.Result{}, nil
 }
