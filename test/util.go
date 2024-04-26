@@ -23,7 +23,6 @@ func getPools() *v1.PoolList {
 					VCpus:      10,
 					Memory:     100,
 					Storage:    1000,
-					Networks:   10,
 					Server:     "vcenter-0",
 					Datacenter: "dc-0",
 					Cluster:    "cluster-0",
@@ -40,7 +39,6 @@ func getPools() *v1.PoolList {
 					VCpus:      20,
 					Memory:     200,
 					Storage:    2000,
-					Networks:   20,
 					Server:     "vcenter-1",
 					Datacenter: "dc-1",
 					Cluster:    "cluster-1",
@@ -57,7 +55,6 @@ func getPools() *v1.PoolList {
 					VCpus:      10,
 					Memory:     100,
 					Storage:    100,
-					Networks:   10,
 					Server:     "vcenter-2",
 					Datacenter: "dc-2",
 					Cluster:    "cluster-2",
@@ -74,7 +71,6 @@ func getPools() *v1.PoolList {
 					VCpus:      10,
 					Memory:     100,
 					Storage:    100,
-					Networks:   10,
 					Server:     "vcenter-3",
 					Datacenter: "dc-3",
 					Cluster:    "cluster-3",
@@ -115,6 +111,11 @@ func (r *resourceRequest) WithName(name string) *resourceRequest {
 	return r
 }
 
+func (r *resourceRequest) WithPoolCount(cnt int) *resourceRequest {
+	r.request.Spec.VCenters = cnt
+	return r
+}
+
 func (r *resourceRequest) WithShape(shape shape) *resourceRequest {
 	r.request.Spec.VCpus = int(16 * int64(shape))
 	r.request.Spec.Memory = int(16 * int64(shape))
@@ -150,10 +151,10 @@ func IsLeaseReflectedInPool(ctx context.Context, client client.Client, lease *v1
 			if pool.Status.VCpusAvailable != pool.Spec.VCpus-lease.Spec.VCpus ||
 				pool.Status.MemoryAvailable != pool.Spec.Memory-lease.Spec.Memory ||
 				pool.Status.DatastoreAvailable != pool.Spec.Storage-lease.Spec.Storage ||
-				pool.Status.NetworkAvailable != pool.Spec.Networks-len(lease.Status.PortGroups) {
+				pool.Status.NetworkAvailable != pool.Status.NetworkAvailable-len(lease.Status.PortGroups) {
 				return false, nil
 			}
 		}
 	}
-	return false, nil
+	return true, nil
 }

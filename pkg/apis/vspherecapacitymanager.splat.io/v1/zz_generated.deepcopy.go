@@ -235,9 +235,13 @@ func (in *PoolStatus) DeepCopyInto(out *PoolStatus) {
 	*out = *in
 	if in.Leases != nil {
 		in, out := &in.Leases, &out.Leases
-		*out = make([]corev1.TypedLocalObjectReference, len(*in))
+		*out = make([]*corev1.TypedLocalObjectReference, len(*in))
 		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
+			if (*in)[i] != nil {
+				in, out := &(*in)[i], &(*out)[i]
+				*out = new(corev1.TypedLocalObjectReference)
+				(*in).DeepCopyInto(*out)
+			}
 		}
 	}
 	if in.PortGroups != nil {

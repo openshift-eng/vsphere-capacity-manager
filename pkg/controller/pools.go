@@ -3,18 +3,17 @@ package controller
 import (
 	"context"
 	"fmt"
+	"log"
 	"reflect"
 	"time"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/resources"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type PoolReconciler struct {
@@ -79,10 +78,36 @@ func comparePoolStatus(a, b v1.PoolStatus) bool {
 	return true
 }
 
+func (l *PoolReconciler) ensureCapacityIsUpdated(ctx context.Context, pool *v1.Pool) error {
+	leases := &v1.LeaseList{}
+	pool.Status.NetworkAvailable = len(pool.Status.PortGroups)
+	pool.Status.VCpusAvailable = pool.Spec.VCpus
+	pool.Status.MemoryAvailable = pool.Spec.Memory
+	pool.Status.DatastoreAvailable = pool.Spec.Storage
+
+	err := l.Client.List(ctx, leases, client.InNamespace(pool.Namespace))
+	if err != nil {
+		return fmt.Errorf("error listing leases: %w", err)
+	}
+
+	for _, lease := range leases.Items {
+		if lease.Status.Pool == nil {
+			continue
+		}
+		if lease.Status.Pool.Name != pool.Name {
+			continue
+		}
+		resources.CalculateResourceUsage(pool, &lease)
+	}
+
+	return l.Client.Status().Update(ctx, pool)
+}
+
 func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx, "namespace", req.Namespace, "name", req.Name)
-	logger.V(1).Info("Reconciling resource request")
-	defer logger.V(1).Info("Finished reconciling resource request")
+	//logger := log.FromContext(ctx, "namespace", req.Namespace, "name", req.Name)
+	log.Printf("reconciling pool: %s", req.Name)
+	//logger.V(1).Info("Reconciling resource request")
+	defer log.Print("Finished reconciling resource request")
 
 	// Fetch the ResourceRequest instance.
 	pool := &v1.Pool{}
@@ -90,14 +115,12 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	statusOnStart := pool.Status.DeepCopy()
+	log.Printf("pool %s annotations: %v", pool.Name, pool.Annotations)
 
 	if pool.DeletionTimestamp != nil {
-		logger.V(1).Info("Pool is being deleted")
+		log.Print("Pool is being deleted")
 		return ctrl.Result{}, nil
 	}
-
-	resources.AddPool(pool)
 
 	leases := &v1.LeaseList{}
 	err := l.Client.List(ctx, leases, client.InNamespace(pool.Namespace))
@@ -105,24 +128,10 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, fmt.Errorf("error listing leases: %w", err)
 	}
 
-	pool.Status.Leases = []corev1.TypedLocalObjectReference{}
-	leaseMap := map[string]*v1.Lease{}
-	for _, lease := range leases.Items {
-		if lease.Status.Pool != nil {
-			continue
-		}
-		pool.Status.Leases = append(pool.Status.Leases, corev1.TypedLocalObjectReference{
-			Name: lease.Name,
-		})
-		leaseMap[lease.Name] = &lease
-	}
-
-	resources.CalculateResourceUsage(pool, leaseMap)
-
-	if !comparePoolStatus(*statusOnStart, pool.Status) {
-		if err := l.Status().Update(ctx, pool); err != nil {
-			return ctrl.Result{RequeueAfter: 2 * time.Second}, fmt.Errorf("error updating pool status: %w", err)
-		}
+	err = l.ensureCapacityIsUpdated(ctx, pool)
+	if err != nil {
+		log.Printf("error updating pool status, requeuing: %v", err)
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 	return ctrl.Result{}, nil
 }

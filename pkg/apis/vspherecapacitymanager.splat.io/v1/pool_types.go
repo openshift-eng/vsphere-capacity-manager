@@ -5,6 +5,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	POOLS_LAST_LEASE_UPDATE_ANNOTATION = "vspherecapacitymanager.splat.io/last-lease-update"
+	//POOLS_STATUS_ = "2006-01-02
+)
+
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
@@ -34,8 +39,6 @@ type PoolSpec struct {
 	Memory int `json:"memory"`
 	// Storage is the amount of storage in GB
 	Storage int `json:"storage"`
-	// Networks is the number of networks requested
-	Networks int `json:"networks"`
 	// Server the server that provisions resources for the pool
 	Server string `json:"server"`
 	// Datacenter associated with this pool
@@ -53,19 +56,29 @@ type PoolSpec struct {
 // PoolStatus defines the status for a pool
 type PoolStatus struct {
 	// VCPUsAvailable is the number of vCPUs available in the pool
+	// +optional
 	VCpusAvailable int `json:"vcpus-available"`
 	// MemoryAvailable is the amount of memory in GB available in the pool
+	// +optional
 	MemoryAvailable int `json:"memory-available"`
 	// StorageAvailable is the amount of storage in GB available in the pool
+	// +optional
 	DatastoreAvailable int `json:"datastore-available"`
 	// Leases is the list of leases assigned to this pool
-	Leases []corev1.TypedLocalObjectReference `json:"leases"`
+	// +optional
+	Leases []*corev1.TypedLocalObjectReference `json:"leases"`
 	// Networks is the number of networks available in the pool
+	// +optional
 	NetworkAvailable int `json:"network-available"`
 	// PortGroups is the list of port groups available in the pool
+	// +optional
 	PortGroups []Network `json:"port-groups"`
 	// ActivePortGroups is the list of port groups that are currently in use
+	// +optional
 	ActivePortGroups []Network `json:"active-port-groups"`
+	// Initialized is true when the pool has been initialize
+	// +optional
+	Initialized bool `json:"initialized"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

@@ -22,6 +22,7 @@ const (
 // +kubebuilder:printcolumn:name="Memory(GB)",type=string,JSONPath=`.spec.memory`
 // +kubebuilder:printcolumn:name="Storage(GB)",type=string,JSONPath=`.spec.storage`
 // +kubebuilder:printcolumn:name="Pool",type=string,JSONPath=`.status.pool.name`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 type Lease struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -60,6 +61,10 @@ type LeaseStatus struct {
 	// PortGroups is the list of port groups associated with this lease
 	// +optional
 	PortGroups []Network `json:"port-groups,omitempty"`
+
+	// Phase is the current phase of the lease
+	// +optional
+	Phase Phase `json:"phase,omitempty"`
 }
 
 type Leases []*Lease

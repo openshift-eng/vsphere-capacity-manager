@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"time"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/resources"
@@ -14,7 +16,6 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type ResourceRequestReconciler struct {
@@ -67,10 +68,28 @@ func (l *ResourceRequestReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return nil
 }
 
+func (l *ResourceRequestReconciler) ensureLeasesAreRemovedFromPool(ctx context.Context, resourceRequest *v1.ResourceRequest) (ctrl.Result, error) {
+	for _, leaseRef := range resourceRequest.Status.Leases {
+		lease := &v1.Lease{}
+		if err := l.Get(ctx, client.ObjectKey{
+			Namespace: resourceRequest.Namespace,
+			Name:      leaseRef.Name,
+		}, lease); err != nil {
+			log.Printf("unable to retrieve lease %s: %v", leaseRef.Name, err)
+			return ctrl.Result{}, err
+		}
+		err := l.Client.Delete(ctx, lease)
+		if err != nil {
+			log.Printf("unable to delete lease, requeuing %s: %v", leaseRef.Name, err)
+			return ctrl.Result{
+				RequeueAfter: 2 * time.Second,
+			}, nil
+		}
+	}
+	return ctrl.Result{}, nil
+}
+
 func (l *ResourceRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx, "namespace", req.Namespace, "name", req.Name)
-	logger.V(1).Info("Reconciling resource request")
-	defer logger.V(1).Info("Finished reconciling resource request")
 
 	// Fetch the ResourceRequest instance.
 	resourceRequest := &v1.ResourceRequest{}
@@ -78,10 +97,10 @@ func (l *ResourceRequestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	//spew.Dump(resourceRequest)
 	// TO-DO: clean up the resource request if it is being deleted
 	if resourceRequest.DeletionTimestamp != nil {
-		logger.V(1).Info("Resource request is being deleted")
-		return ctrl.Result{}, nil
+		return l.ensureLeasesAreRemovedFromPool(ctx, resourceRequest)
 	}
 
 	if resourceRequest.Status.Phase == v1.PHASE_FULFILLED ||

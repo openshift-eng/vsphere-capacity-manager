@@ -39,15 +39,24 @@ var (
 					Namespace: "default",
 				},
 				Spec: v1.PoolSpec{
-					VCpus:      10,
-					Memory:     100,
+					VCpus:      20,
+					Memory:     200,
 					Storage:    1000,
-					Networks:   10,
 					Server:     "vcs8e-vc.ocp2.dev.cluster.com",
 					Datacenter: "dc-0",
 					Cluster:    "cluster-0",
 					Datastore:  "datastore-0",
 					Exclude:    false,
+				},
+				Status: v1.PoolStatus{
+					PortGroups: []v1.Network{
+						{
+							VifIpAddress: "192.168.0.1",
+						},
+						{
+							VifIpAddress: "192.168.0.2",
+						},
+					},
 				},
 			},
 			{
@@ -59,12 +68,21 @@ var (
 					VCpus:      20,
 					Memory:     200,
 					Storage:    2000,
-					Networks:   20,
 					Server:     "vcenter.ibmc.devcluster.openshift.com",
 					Datacenter: "dc-1",
 					Cluster:    "cluster-1",
 					Datastore:  "datastore-1",
 					Exclude:    false,
+				},
+				Status: v1.PoolStatus{
+					PortGroups: []v1.Network{
+						{
+							VifIpAddress: "192.168.0.1",
+						},
+						{
+							VifIpAddress: "192.168.0.2",
+						},
+					},
 				},
 			},
 			{
@@ -80,12 +98,21 @@ var (
 					VCpus:      10,
 					Memory:     100,
 					Storage:    100,
-					Networks:   10,
 					Server:     "vcenter.devqe.ibmc.devcluster.openshift.com",
 					Datacenter: "dc-2",
 					Cluster:    "cluster-2",
 					Datastore:  "datastore-2",
 					Exclude:    true,
+				},
+				Status: v1.PoolStatus{
+					PortGroups: []v1.Network{
+						{
+							VifIpAddress: "192.168.0.1",
+						},
+						{
+							VifIpAddress: "192.168.0.2",
+						},
+					},
 				},
 			},
 			{
@@ -101,12 +128,21 @@ var (
 					VCpus:      10,
 					Memory:     100,
 					Storage:    100,
-					Networks:   10,
 					Server:     "v8c-2-vcenter.ocp2.dev.cluster.com",
 					Datacenter: "dc-3",
 					Cluster:    "cluster-3",
 					Datastore:  "datastore-3",
 					Exclude:    true,
+				},
+				Status: v1.PoolStatus{
+					PortGroups: []v1.Network{
+						{
+							VifIpAddress: "192.168.0.1",
+						},
+						{
+							VifIpAddress: "192.168.0.2",
+						},
+					},
 				},
 			},
 		},
@@ -133,7 +169,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
-	SetDefaultEventuallyTimeout(30 * time.Second)
+	SetDefaultEventuallyTimeout(10 * time.Second)
 
 	//+kubebuilder:scaffold:scheme
 
@@ -141,9 +177,6 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	for _, pool := range pools.Items {
-		Expect(k8sClient.Create(ctx, &pool)).To(Succeed())
-	}
 	komega.SetClient(k8sClient)
 	komega.SetContext(ctx)
 })

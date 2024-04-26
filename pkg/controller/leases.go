@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
@@ -10,10 +11,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type LeaseReconciler struct {
@@ -54,10 +55,127 @@ func (l *LeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return nil
 }
 
+func (l *LeaseReconciler) setLeasePhase(ctx context.Context, lease *v1.Lease, phase v1.Phase) error {
+	lease.Status.Phase = phase
+	return l.Client.Status().Update(ctx, lease)
+}
+
+func (l *LeaseReconciler) ensureLeaseIsRemovedFromPool(ctx context.Context, lease *v1.Lease) (ctrl.Result, error) {
+	var pool *v1.Pool = &v1.Pool{}
+	err := l.Client.Get(ctx, types.NamespacedName{
+		Namespace: lease.Namespace,
+		Name:      lease.Status.Pool.Name,
+	}, pool)
+	if err != nil {
+		log.Printf("error getting pool, requeuing: %v", err)
+		return ctrl.Result{
+			RequeueAfter: 2 * time.Second,
+		}, nil
+	}
+
+	// attempt to unbind the lease from the pool active port groups
+	adjustedActivePortGroups := []v1.Network{}
+	for _, portGroup := range pool.Status.ActivePortGroups {
+		found := false
+		for _, leasePortGroup := range lease.Status.PortGroups {
+			if resources.CompareNetworks(portGroup, leasePortGroup) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			adjustedActivePortGroups = append(adjustedActivePortGroups, portGroup)
+		}
+	}
+
+	pool.Status.ActivePortGroups = adjustedActivePortGroups
+
+	// attempt to unbind the lease from the pool leases
+	adjustedLeases := []*corev1.TypedLocalObjectReference{}
+	for _, poolLease := range pool.Status.Leases {
+		if poolLease.Name != lease.Name {
+			adjustedLeases = append(adjustedLeases, poolLease)
+		}
+	}
+	pool.Status.Leases = adjustedLeases
+
+	pool.Status.VCpusAvailable += lease.Spec.VCpus
+	pool.Status.MemoryAvailable += lease.Spec.Memory
+	pool.Status.DatastoreAvailable += lease.Spec.Storage
+	pool.Status.NetworkAvailable = len(pool.Status.PortGroups) - len(pool.Status.ActivePortGroups)
+
+	err = l.Client.Status().Update(ctx, pool)
+	if err != nil {
+		log.Printf("error updating pool, requeuing: %v", err)
+		return ctrl.Result{
+			RequeueAfter: 2 * time.Second,
+		}, nil
+	}
+	return ctrl.Result{}, nil
+}
+
+func (l *LeaseReconciler) ensureLeaseIsInPool(ctx context.Context, lease *v1.Lease) (ctrl.Result, error) {
+	var pool *v1.Pool = &v1.Pool{}
+
+	err := l.Client.Get(ctx, types.NamespacedName{
+		Namespace: lease.Namespace,
+		Name:      lease.Status.Pool.Name,
+	}, pool)
+	if err != nil {
+		log.Printf("error getting pool, requeuing: %v", err)
+		return ctrl.Result{
+			RequeueAfter: 5 * time.Second,
+		}, nil
+	}
+
+	for _, poolLease := range pool.Status.Leases {
+		if poolLease.Name == lease.Name {
+			err = l.setLeasePhase(ctx, lease, v1.PHASE_FULFILLED)
+			if err != nil {
+				log.Printf("error setting lease phase, requeuing: %v", err)
+				return ctrl.Result{
+					RequeueAfter: 5 * time.Second,
+				}, nil
+			}
+			return ctrl.Result{}, nil
+		}
+	}
+
+	pool.Status.Leases = append(pool.Status.Leases, &corev1.TypedLocalObjectReference{
+		Name:     lease.Name,
+		APIGroup: &v1.GroupVersion.Group,
+		Kind:     "Lease",
+	})
+
+	resources.CalculateResourceUsage(pool, lease)
+
+	log.Printf("updating pool with lease: leases %d", len(pool.Status.Leases))
+	err = l.Client.Status().Update(ctx, pool)
+	if err != nil {
+		log.Printf("error updating pool, requeuing: %v", err)
+		return ctrl.Result{
+			RequeueAfter: 5 * time.Second,
+		}, nil
+	}
+
+	lease.Status.Pool = &corev1.TypedLocalObjectReference{
+		Name: pool.Name,
+	}
+
+	err = l.setLeasePhase(ctx, lease, v1.PHASE_FULFILLED)
+	if err != nil {
+		log.Printf("error setting lease phase, requeuing: %v", err)
+		return ctrl.Result{
+			RequeueAfter: 5 * time.Second,
+		}, nil
+	}
+
+	return ctrl.Result{}, nil
+}
+
 func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx, "namespace", req.Namespace, "name", req.Name)
-	logger.V(1).Info("Reconciling lease")
-	defer logger.V(1).Info("Finished reconciling lease")
+	log.Print("Reconciling lease")
+	defer log.Print("Finished reconciling lease")
 
 	// Fetch the Lease instance.
 	lease := &v1.Lease{}
@@ -65,40 +183,66 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if lease.DeletionTimestamp != nil {
-		logger.V(1).Info("Lease is being deleted")
-		err := resources.RemoveLease(lease)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, nil
-	}
-
-	if lease.Status.Pool != nil {
-		logger.V(1).Info("Lease already has a pool")
-		return ctrl.Result{}, nil
-	}
-
-	pool, err := resources.GetPoolWithStrategy(lease, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
+	pools := v1.PoolList{}
+	err := l.Client.List(ctx, &pools)
 	if err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("error listing pools: %w", err)
+	}
+
+	if lease.DeletionTimestamp != nil {
+		log.Print("Lease is being deleted")
+		return l.ensureLeaseIsRemovedFromPool(ctx, lease)
+	}
+
+	if lease.Status.Phase == v1.PHASE_FULFILLED {
+		log.Print("lease is already fulfilled")
+		return ctrl.Result{}, nil
+
+	}
+	if lease.Status.Pool != nil {
+		log.Print("lease already has a pool")
+		return ctrl.Result{}, nil
+	}
+
+	lease.Status.Phase = v1.PHASE_PENDING
+
+	pool, err := resources.GetPoolWithStrategy(lease, pools.Items, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
+	if err != nil {
+		l.Client.Status().Update(ctx, lease)
+		log.Printf("error getting pool: %v", err)
+		return ctrl.Result{
+			RequeueAfter: 5 * time.Second,
+		}, nil
 	}
 
 	lease.Status.Pool = &corev1.TypedLocalObjectReference{
 		Name: pool.Name,
 	}
-	err = resources.AddLease(lease)
+
+	err = l.Client.Get(ctx, client.ObjectKeyFromObject(pool), pool)
 	if err != nil {
+		log.Printf("error getting pool: %v", err)
 		return ctrl.Result{
 			RequeueAfter: 5 * time.Second,
-		}, err
+		}, nil
+	}
+
+	log.Printf("Updating pool %s with last lease update annotation %v", pool.Name, &pool.ObjectMeta.Annotations)
+	err = l.Client.Update(ctx, pool)
+	if err != nil {
+		log.Printf("error udpating pool: %v", err)
+		return ctrl.Result{
+			RequeueAfter: 5 * time.Second,
+		}, nil
 	}
 
 	err = l.Client.Status().Update(ctx, lease)
 	if err != nil {
-		return ctrl.Result{}, err
+		log.Printf("error updating lease: %v", err)
+		return ctrl.Result{
+			RequeueAfter: 5 * time.Second,
+		}, nil
 	}
 
-	l.Client.Get(ctx, client.ObjectKeyFromObject(pool), pool)
-	return ctrl.Result{}, nil
+	return l.ensureLeaseIsInPool(ctx, lease)
 }
