@@ -44,14 +44,6 @@ var _ = Describe("Lease management", func() {
 		})
 		Expect(err).ToNot(HaveOccurred(), "Manager should be able to be created")
 
-		poolReconciler := &controller.PoolReconciler{
-			Client:         mgr.GetClient(),
-			UncachedClient: mgr.GetClient(),
-			Namespace:      namespaceName,
-			OperatorName:   controllerName,
-		}
-		Expect(poolReconciler.SetupWithManager(mgr)).To(Succeed(), "Reconciler should be able to setup with manager")
-
 		resourceRequestReconciler := &controller.ResourceRequestReconciler{
 			Client:         mgr.GetClient(),
 			UncachedClient: mgr.GetClient(),
@@ -118,6 +110,13 @@ var _ = Describe("Lease management", func() {
 		mgrCancel()
 		// Wait for the mgrDone to be closed, which will happen once the mgr has stopped
 		<-mgrDone
+
+		leases := &v1.LeaseList{}
+		Expect(k8sClient.List(ctx, leases, client.InNamespace(namespaceName))).To(Succeed())
+		for _, lease := range leases.Items {
+			lease.ObjectMeta.Finalizers = []string{}
+			Expect(k8sClient.Update(ctx, &lease)).To(Succeed())
+		}
 
 		Expect(k8sClient.DeleteAllOf(ctx, &v1.ResourceRequest{}, client.InNamespace(namespaceName))).To(Succeed())
 		Expect(k8sClient.DeleteAllOf(ctx, &v1.Lease{}, client.InNamespace(namespaceName))).To(Succeed())
@@ -364,5 +363,73 @@ var _ = Describe("Lease management", func() {
 			})
 		})
 	})
+	It("should acquire a lease in a non-default pool, then delete the lease", func() {
+		var req *v1.ResourceRequest
+		By("creating a resource request", func() {
+			req = GetResourceRequest().WithShape(SHAPE_SMALL).WithPool("sample-zonal-pool-0").Build()
+			Expect(req).NotTo(BeNil())
 
+			Expect(k8sClient.Create(ctx, req)).To(Succeed())
+		})
+
+		By("waiting for the leases to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(req), req)
+				return req.Status.Phase == v1.PHASE_FULFILLED
+			}).Should(BeTrue())
+		})
+
+		leases := &v1.LeaseList{}
+		By("checking the leases", func() {
+			By("associated pool should reflect the resources claimed by the leases", func() {
+				Eventually(func() bool {
+					Expect(k8sClient.List(ctx, leases, client.InNamespace(namespaceName))).To(Succeed())
+					if len(leases.Items) != 1 {
+						return false
+					}
+
+					for _, lease := range leases.Items {
+						result, _ := IsLeaseReflectedInPool(ctx, k8sClient, &lease)
+						if result == false {
+							return false
+						}
+					}
+
+					return true
+				}).Should(BeTrue())
+			})
+		})
+
+		By("deleting the leases", func() {
+			leases := &v1.LeaseList{}
+			attachedLeases := req.Status.DeepCopy().Leases
+			By("by deleting the resource request", func() {
+				Expect(k8sClient.List(ctx, leases, client.InNamespace(namespaceName))).To(Succeed())
+				Expect(k8sClient.Delete(ctx, req)).To(Succeed())
+			})
+			By("waiting for the leases to be delete", func() {
+				Eventually(func() bool {
+					for _, lease := range attachedLeases {
+						tmpLease := &v1.Lease{}
+						err := k8sClient.Get(ctx, client.ObjectKey{Name: lease.Name, Namespace: namespaceName}, tmpLease)
+						if err != nil {
+							return false
+						}
+					}
+					return true
+				}).Should(BeTrue())
+			})
+			By("checking that the pool is updated", func() {
+				Eventually(func() bool {
+					for _, lease := range leases.Items {
+						result, _ := IsLeaseReflectedInPool(ctx, k8sClient, &lease)
+						if result {
+							return false
+						}
+					}
+					return true
+				}).Should(BeTrue())
+			})
+		})
+	})
 })

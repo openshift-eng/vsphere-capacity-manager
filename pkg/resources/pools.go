@@ -2,6 +2,7 @@ package resources
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
 	"reflect"
 	"sort"
@@ -9,13 +10,31 @@ import (
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 )
 
+func InitializePool(pool *v1.Pool) {
+	if pool.Status.Initialized {
+		return
+	}
+
+	pool.Status.VCpusAvailable = pool.Spec.VCpus
+	pool.Status.MemoryAvailable = pool.Spec.Memory
+	pool.Status.DatastoreAvailable = pool.Spec.Storage
+	pool.Status.NetworkAvailable = len(pool.Status.PortGroups)
+	pool.Status.Initialized = true
+	log.Printf("InitializePool - pool:%s|CPU:%d|Memory:%d|Storage:%d|Networks:%d", pool.Name, pool.Spec.VCpus, pool.Spec.Memory, pool.Spec.Storage, len(pool.Status.PortGroups))
+}
+
 // CalculateResourceUsage calculates the resource usage of a pool
-func CalculateResourceUsage(pool *v1.Pool, lease *v1.Lease) {
+func CalculateResourceUsage(pool *v1.Pool, lease *v1.Lease) error {
 	pool.Status.VCpusAvailable -= lease.Spec.VCpus
 	pool.Status.MemoryAvailable -= lease.Spec.Memory
 	pool.Status.DatastoreAvailable -= lease.Spec.Storage
 	pool.Status.NetworkAvailable -= len(pool.Status.PortGroups) - len(pool.Status.ActivePortGroups)
-	//pool.Status.NetworkAvailable -= len(lease.Status.PortGroups)
+
+	if pool.Status.VCpusAvailable < 0 || pool.Status.MemoryAvailable < 0 || pool.Status.DatastoreAvailable < 0 || pool.Status.NetworkAvailable < 0 {
+		return fmt.Errorf("pool %s has negative resources", pool.Name)
+	}
+	log.Printf("CalculateResourceUsage - pool:%s|CPU:%d|Memory:%d|Storage:%d|Networks:%d", pool.Name, pool.Status.VCpusAvailable, pool.Status.MemoryAvailable, pool.Status.DatastoreAvailable, pool.Status.NetworkAvailable)
+	return nil
 }
 
 func CompareNetworks(a, b v1.Network) bool {
@@ -66,19 +85,21 @@ func GetAvailablePortGroups(pool *v1.Pool) []v1.Network {
 
 // GetFittingPools returns a list of pools that have enough resources to satisfy the resource requirements.
 // The list is sorted by the sum of the resource usage of the pool. The pool with the least resource usage is first.
-func GetFittingPools(lease *v1.Lease, pools []v1.Pool) []*v1.Pool {
+func GetFittingPools(lease *v1.Lease, pools []*v1.Pool) []*v1.Pool {
 	var fittingPools []*v1.Pool
 	for _, pool := range pools {
-		if pool.Spec.Exclude {
-			if len(lease.Spec.RequiredPool) == 0 || lease.Spec.RequiredPool != pool.ObjectMeta.Name {
-				continue
-			}
+		nameMatch := len(lease.Spec.RequiredPool) > 0 && lease.Spec.RequiredPool == pool.ObjectMeta.Name
+		if !nameMatch && pool.Spec.Exclude {
+			continue
+		}
+		if len(lease.Spec.RequiredPool) > 0 && !nameMatch {
+			continue
 		}
 		if int(pool.Status.VCpusAvailable) >= lease.Spec.VCpus &&
 			int(pool.Status.MemoryAvailable) >= lease.Spec.Memory &&
 			int(pool.Status.DatastoreAvailable) >= lease.Spec.Storage &&
 			int(len(pool.Status.PortGroups)-len(pool.Status.ActivePortGroups)) >= lease.Spec.Networks {
-			fittingPools = append(fittingPools, &pool)
+			fittingPools = append(fittingPools, pool)
 		}
 	}
 	sort.Slice(fittingPools, func(i, j int) bool {
@@ -97,7 +118,7 @@ func shuffleFittingPools(pools []*v1.Pool) {
 }
 
 // GetPoolWithStrategy returns a pool that has enough resources to satisfy the lease requirements.
-func GetPoolWithStrategy(lease *v1.Lease, pools []v1.Pool, strategy v1.AllocationStrategy) (*v1.Pool, error) {
+func GetPoolWithStrategy(lease *v1.Lease, pools []*v1.Pool, strategy v1.AllocationStrategy) (*v1.Pool, error) {
 	fittingPools := GetFittingPools(lease, pools)
 
 	if len(fittingPools) == 0 {

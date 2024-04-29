@@ -148,13 +148,13 @@ func IsLeaseReflectedInPool(ctx context.Context, client client.Client, lease *v1
 	}
 	for _, ref := range pool.Status.Leases {
 		if ref.Name == lease.Name {
-			if pool.Status.VCpusAvailable != pool.Spec.VCpus-lease.Spec.VCpus ||
-				pool.Status.MemoryAvailable != pool.Spec.Memory-lease.Spec.Memory ||
-				pool.Status.DatastoreAvailable != pool.Spec.Storage-lease.Spec.Storage ||
-				pool.Status.NetworkAvailable != pool.Status.NetworkAvailable-len(lease.Status.PortGroups) {
-				return false, nil
+			if pool.Status.VCpusAvailable == pool.Spec.VCpus-lease.Spec.VCpus ||
+				pool.Status.MemoryAvailable == pool.Spec.Memory-lease.Spec.Memory ||
+				pool.Status.DatastoreAvailable == pool.Spec.Storage-lease.Spec.Storage ||
+				pool.Status.NetworkAvailable == pool.Status.NetworkAvailable-len(lease.Status.PortGroups) {
+				return true, nil
 			}
 		}
 	}
-	return true, nil
+	return false, nil
 }

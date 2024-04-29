@@ -18,6 +18,7 @@ func ConstructLeases(request *v1.ResourceRequest) []*v1.Lease {
 		leases = append(leases, &v1.Lease{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "vsphere-lease-",
+				Finalizers:   []string{v1.LeaseFinalizer},
 				Namespace:    request.ObjectMeta.Namespace,
 				OwnerReferences: []metav1.OwnerReference{
 					{

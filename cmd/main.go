@@ -31,12 +31,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.PoolReconciler{}).
-		SetupWithManager(mgr); err != nil {
-		log.Printf("unable to create controller: %v", err)
-		os.Exit(1)
-	}
-
 	if err := (&controller.LeaseReconciler{}).
 		SetupWithManager(mgr); err != nil {
 		log.Printf("unable to create controller: %v", err)

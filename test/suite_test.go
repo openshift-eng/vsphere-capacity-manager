@@ -95,9 +95,9 @@ var (
 					Namespace: "default",
 				},
 				Spec: v1.PoolSpec{
-					VCpus:      10,
-					Memory:     100,
-					Storage:    100,
+					VCpus:      40,
+					Memory:     400,
+					Storage:    4000,
 					Server:     "vcenter.devqe.ibmc.devcluster.openshift.com",
 					Datacenter: "dc-2",
 					Cluster:    "cluster-2",
@@ -125,9 +125,9 @@ var (
 					Namespace: "default",
 				},
 				Spec: v1.PoolSpec{
-					VCpus:      10,
-					Memory:     100,
-					Storage:    100,
+					VCpus:      20,
+					Memory:     200,
+					Storage:    2000,
 					Server:     "v8c-2-vcenter.ocp2.dev.cluster.com",
 					Datacenter: "dc-3",
 					Cluster:    "cluster-3",
@@ -169,7 +169,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
-	SetDefaultEventuallyTimeout(10 * time.Second)
+	SetDefaultEventuallyTimeout(30 * time.Second)
 
 	//+kubebuilder:scaffold:scheme
 

@@ -62,6 +62,17 @@ func (l *LeaseReconciler) setLeasePhase(ctx context.Context, lease *v1.Lease, ph
 
 func (l *LeaseReconciler) ensureLeaseIsRemovedFromPool(ctx context.Context, lease *v1.Lease) (ctrl.Result, error) {
 	var pool *v1.Pool = &v1.Pool{}
+	if lease.Status.Pool == nil {
+		lease.ObjectMeta.Finalizers = []string{}
+		err := l.Client.Update(ctx, lease)
+		if err != nil {
+			log.Printf("error updating lease, requeuing: %v", err)
+			return ctrl.Result{
+				RequeueAfter: 2 * time.Second,
+			}, nil
+		}
+		return ctrl.Result{}, nil
+	}
 	err := l.Client.Get(ctx, types.NamespacedName{
 		Namespace: lease.Namespace,
 		Name:      lease.Status.Pool.Name,
@@ -111,6 +122,15 @@ func (l *LeaseReconciler) ensureLeaseIsRemovedFromPool(ctx context.Context, leas
 			RequeueAfter: 2 * time.Second,
 		}, nil
 	}
+
+	lease.ObjectMeta.Finalizers = []string{}
+	err = l.Client.Update(ctx, lease)
+	if err != nil {
+		log.Printf("error updating lease, requeuing: %v", err)
+		return ctrl.Result{
+			RequeueAfter: 2 * time.Second,
+		}, nil
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -147,7 +167,11 @@ func (l *LeaseReconciler) ensureLeaseIsInPool(ctx context.Context, lease *v1.Lea
 		Kind:     "Lease",
 	})
 
-	resources.CalculateResourceUsage(pool, lease)
+	err = resources.CalculateResourceUsage(pool, lease)
+	if err != nil {
+		log.Printf("error calculating resource usage, requeuing: %v", err)
+		return ctrl.Result{}, fmt.Errorf("error calculating resource usage: %w", err)
+	}
 
 	log.Printf("updating pool with lease: leases %d", len(pool.Status.Leases))
 	err = l.Client.Status().Update(ctx, pool)
@@ -173,6 +197,57 @@ func (l *LeaseReconciler) ensureLeaseIsInPool(ctx context.Context, lease *v1.Lea
 	return ctrl.Result{}, nil
 }
 
+// reconcilePoolStates updates the states of all pools. this ensures we have the most up-to-date state of the pools
+// before we attempt to reconcile any leases.
+func (l *LeaseReconciler) reconcilePoolStates(ctx context.Context, req ctrl.Request) ([]*v1.Pool, error) {
+	pools := v1.PoolList{}
+	err := l.Client.List(ctx, &pools)
+	if err != nil {
+		return nil, fmt.Errorf("error listing pools: %w", err)
+	}
+
+	outList := []*v1.Pool{}
+
+	for _, pool := range pools.Items {
+		leases := v1.LeaseList{}
+		resources.InitializePool(&pool)
+		err := l.Client.List(ctx, &leases, client.InNamespace(pool.Namespace))
+		if err != nil {
+			return nil, fmt.Errorf("error listing leases: %w", err)
+		}
+
+		for _, lease := range leases.Items {
+			if lease.Status.Pool == nil {
+				continue
+			}
+			if lease.Status.Pool.Name != pool.Name {
+				continue
+			}
+			isLeaseInPool := false
+			for _, leaseInPool := range pool.Status.Leases {
+				if leaseInPool.Name == lease.Name {
+					isLeaseInPool = true
+					break
+				}
+			}
+			if isLeaseInPool {
+				continue
+			}
+			err = resources.CalculateResourceUsage(&pool, &lease)
+			if err != nil {
+				return nil, fmt.Errorf("error calculating resource usage: %w", err)
+			}
+		}
+		err = l.Client.Status().Update(ctx, &pool)
+		if err != nil {
+			return nil, fmt.Errorf("error updating pool: %v", err)
+		}
+		outList = append(outList, &pool)
+	}
+
+	return outList, nil
+}
+
 func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log.Print("Reconciling lease")
 	defer log.Print("Finished reconciling lease")
@@ -189,6 +264,14 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, fmt.Errorf("error listing pools: %w", err)
 	}
 
+	updatedPools, err := l.reconcilePoolStates(ctx, req)
+	if err != nil {
+		log.Printf("error updating pool states, requeuing: %v", err)
+		return ctrl.Result{
+			RequeueAfter: 5 * time.Second,
+		}, nil
+	}
+
 	if lease.DeletionTimestamp != nil {
 		log.Print("Lease is being deleted")
 		return l.ensureLeaseIsRemovedFromPool(ctx, lease)
@@ -201,12 +284,19 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 	if lease.Status.Pool != nil {
 		log.Print("lease already has a pool")
+		err = l.setLeasePhase(ctx, lease, v1.PHASE_FULFILLED)
+		if err != nil {
+			log.Printf("error setting lease phase, requeuing: %v", err)
+			return ctrl.Result{
+				RequeueAfter: 5 * time.Second,
+			}, nil
+		}
 		return ctrl.Result{}, nil
 	}
 
 	lease.Status.Phase = v1.PHASE_PENDING
 
-	pool, err := resources.GetPoolWithStrategy(lease, pools.Items, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
+	pool, err := resources.GetPoolWithStrategy(lease, updatedPools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
 	if err != nil {
 		l.Client.Status().Update(ctx, lease)
 		log.Printf("error getting pool: %v", err)
@@ -217,23 +307,6 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	lease.Status.Pool = &corev1.TypedLocalObjectReference{
 		Name: pool.Name,
-	}
-
-	err = l.Client.Get(ctx, client.ObjectKeyFromObject(pool), pool)
-	if err != nil {
-		log.Printf("error getting pool: %v", err)
-		return ctrl.Result{
-			RequeueAfter: 5 * time.Second,
-		}, nil
-	}
-
-	log.Printf("Updating pool %s with last lease update annotation %v", pool.Name, &pool.ObjectMeta.Annotations)
-	err = l.Client.Update(ctx, pool)
-	if err != nil {
-		log.Printf("error udpating pool: %v", err)
-		return ctrl.Result{
-			RequeueAfter: 5 * time.Second,
-		}, nil
 	}
 
 	err = l.Client.Status().Update(ctx, lease)

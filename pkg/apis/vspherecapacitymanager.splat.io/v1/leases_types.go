@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	LeaseKind    = "Lease"
-	APIGroupName = "vsphere-capacity-manager.splat-team.io"
+	LeaseKind      = "Lease"
+	APIGroupName   = "vsphere-capacity-manager.splat-team.io"
+	LeaseFinalizer = "vsphere-capacity-manager.splat-team.io/lease-finalizer"
 )
 
 // +genclient
