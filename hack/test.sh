@@ -1,2 +1,2 @@
 echo KUBEBUILDER_ASSETS=$KUBEBUILDER_ASSETS
-go test -v ./...
+ginkgo -r

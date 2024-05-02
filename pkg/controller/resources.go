@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -11,7 +10,6 @@ import (
 	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/resources"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -35,21 +33,6 @@ type ResourceRequestReconciler struct {
 
 	// ReleaseVersion is the version of current cluster operator release.
 	ReleaseVersion string
-
-	// lastError allows us to track the last error that occurred during reconciliation.
-	lastError *lastErrorTracker
-}
-
-// lastErrorTracker tracks the last error that occurred during reconciliation.
-type lastErrorTracker struct {
-	// lastError is the last error that occurred during reconciliation.
-	lastError error
-
-	// lastErrorTime is the time at which the last error occurred.
-	lastErrorTime metav1.Time
-
-	// count is the number of times we've observed the same error in a row.
-	count int
 }
 
 func (l *ResourceRequestReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -108,7 +91,11 @@ func (l *ResourceRequestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, nil
 	}
 
-	defer l.Status().Update(ctx, resourceRequest)
+	// defer func() {
+	// 	if l.Status().Update(ctx, resourceRequest) != nil {
+	// 		log.Print("unable to update resource request")
+	// 	}
+	// }()
 
 	leases := resources.ConstructLeases(resourceRequest)
 
@@ -117,7 +104,7 @@ func (l *ResourceRequestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			message := fmt.Sprintf("error creating lease: %v", err)
 			resourceRequest.Status.Phase = v1.PHASE_FAILED
 			resourceRequest.Status.State = v1.State(message)
-			return ctrl.Result{}, errors.New(message)
+			break
 		}
 
 		resourceRequest.Status.Leases = append(resourceRequest.Status.Leases, corev1.TypedLocalObjectReference{
@@ -125,7 +112,16 @@ func (l *ResourceRequestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		})
 	}
 
-	resourceRequest.Status.Phase = v1.PHASE_FULFILLED
+	if resourceRequest.Status.Phase != v1.PHASE_FAILED {
+		resourceRequest.Status.Phase = v1.PHASE_FULFILLED
+	}
+
+	if err := l.Status().Update(ctx, resourceRequest); err != nil {
+		log.Printf("error udpating resource request, requeuing")
+		return ctrl.Result{
+			RequeueAfter: 5 * time.Second,
+		}, nil
+	}
 
 	return ctrl.Result{}, nil
 }

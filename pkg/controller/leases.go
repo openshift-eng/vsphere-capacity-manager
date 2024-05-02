@@ -34,9 +34,6 @@ type LeaseReconciler struct {
 
 	// ReleaseVersion is the version of current cluster operator release.
 	ReleaseVersion string
-
-	// lastError allows us to track the last error that occurred during reconciliation.
-	lastError *lastErrorTracker
 }
 
 func (l *LeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -298,7 +295,9 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	pool, err := resources.GetPoolWithStrategy(lease, updatedPools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
 	if err != nil {
-		l.Client.Status().Update(ctx, lease)
+		if l.Client.Status().Update(ctx, lease) != nil {
+			log.Printf("unable to update lease: %v", err)
+		}
 		log.Printf("error getting pool: %v", err)
 		return ctrl.Result{
 			RequeueAfter: 5 * time.Second,
