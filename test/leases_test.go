@@ -83,10 +83,7 @@ var _ = Describe("Lease management", func() {
 				}, &pool)
 				poolStatus.DeepCopyInto(&pool.Status)
 				err = k8sClient.Status().Update(ctx, &pool)
-				if err != nil {
-					return false
-				}
-				return true
+				return err == nil
 			}).Should(BeTrue())
 		}
 
