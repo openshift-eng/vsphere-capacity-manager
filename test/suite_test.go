@@ -48,16 +48,6 @@ var (
 					Datastore:  "datastore-0",
 					Exclude:    false,
 				},
-				Status: v1.PoolStatus{
-					PortGroups: []v1.Network{
-						{
-							VifIpAddress: "192.168.0.1",
-						},
-						{
-							VifIpAddress: "192.168.0.2",
-						},
-					},
-				},
 			},
 			{
 				ObjectMeta: metav1.ObjectMeta{
@@ -73,16 +63,6 @@ var (
 					Cluster:    "cluster-1",
 					Datastore:  "datastore-1",
 					Exclude:    false,
-				},
-				Status: v1.PoolStatus{
-					PortGroups: []v1.Network{
-						{
-							VifIpAddress: "192.168.0.1",
-						},
-						{
-							VifIpAddress: "192.168.0.2",
-						},
-					},
 				},
 			},
 			{
@@ -104,16 +84,6 @@ var (
 					Datastore:  "datastore-2",
 					Exclude:    true,
 				},
-				Status: v1.PoolStatus{
-					PortGroups: []v1.Network{
-						{
-							VifIpAddress: "192.168.0.1",
-						},
-						{
-							VifIpAddress: "192.168.0.2",
-						},
-					},
-				},
 			},
 			{
 				TypeMeta: metav1.TypeMeta{
@@ -133,16 +103,6 @@ var (
 					Cluster:    "cluster-3",
 					Datastore:  "datastore-3",
 					Exclude:    true,
-				},
-				Status: v1.PoolStatus{
-					PortGroups: []v1.Network{
-						{
-							VifIpAddress: "192.168.0.1",
-						},
-						{
-							VifIpAddress: "192.168.0.2",
-						},
-					},
 				},
 			},
 		},
@@ -169,7 +129,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
-	SetDefaultEventuallyTimeout(30 * time.Second)
+	SetDefaultEventuallyTimeout(10 * time.Second)
 
 	//+kubebuilder:scaffold:scheme
 
