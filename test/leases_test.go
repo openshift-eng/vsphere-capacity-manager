@@ -53,6 +53,14 @@ var _ = Describe("Lease management", func() {
 		}
 		Expect(leaseReconciler.SetupWithManager(mgr)).To(Succeed(), "Reconciler should be able to setup with manager")
 
+		poolReconciler := &controller.PoolReconciler{
+			Client:         mgr.GetClient(),
+			UncachedClient: mgr.GetClient(),
+			Namespace:      namespaceName,
+			OperatorName:   controllerName,
+		}
+		Expect(poolReconciler.SetupWithManager(mgr)).To(Succeed(), "Reconciler should be able to setup with manager")
+
 		By("Starting the manager")
 		var mgrCtx context.Context
 		mgrCtx, mgrCancel = context.WithCancel(context.Background())
