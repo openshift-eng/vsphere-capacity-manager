@@ -42,16 +42,6 @@ type PoolSpec struct {
 	Memory int `json:"memory"`
 	// Storage is the amount of storage in GB
 	Storage int `json:"storage"`
-	/*
-		// Server the server that provisions resources for the pool
-		Server string `json:"server"`
-		// Datacenter associated with this pool
-		Datacenter string `json:"datacenter"`
-		// Cluster cluster associated with this pool
-		Cluster string `json:"cluster"`
-		// Datastore datastore associated with this pool
-		Datastore string `json:"datastore"`
-	*/
 	// Exclude when true, this pool is excluded from the default pools.
 	// This is useful if a job must be scheduled to a specific pool and that
 	// pool only has limited capacity.
@@ -77,10 +67,10 @@ type PoolStatus struct {
 	NetworkAvailable int `json:"network-available"`
 	// PortGroups is the list of port groups available in the pool
 	// +optional
-	PortGroups []Network `json:"port-groups"`
+	PortGroups []Subnet `json:"port-groups"`
 	// ActivePortGroups is the list of port groups that are currently in use
 	// +optional
-	ActivePortGroups []Network `json:"active-port-groups"`
+	ActivePortGroups []Subnet `json:"active-port-groups"`
 	// Initialized is true when the pool has been initialize
 	// +optional
 	Initialized bool `json:"initialized"`
