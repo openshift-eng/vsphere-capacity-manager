@@ -164,11 +164,7 @@ var _ = Describe("Lease management", func() {
 				}
 
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease2), lease2)
-				if lease2.Status.Phase != v1.PHASE_FULFILLED {
-					return false
-				}
-
-				return true
+				return lease2.Status.Phase == v1.PHASE_FULFILLED
 			}).Should(BeTrue())
 		})
 
