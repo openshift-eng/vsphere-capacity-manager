@@ -67,10 +67,10 @@ type PoolStatus struct {
 	NetworkAvailable int `json:"network-available"`
 	// PortGroups is the list of port groups available in the pool
 	// +optional
-	PortGroups []Subnet `json:"port-groups"`
+	PortGroups []Network `json:"port-groups"`
 	// ActivePortGroups is the list of port groups that are currently in use
 	// +optional
-	ActivePortGroups []Subnet `json:"active-port-groups"`
+	ActivePortGroups []Network `json:"active-port-groups"`
 	// Initialized is true when the pool has been initialize
 	// +optional
 	Initialized bool `json:"initialized"`
