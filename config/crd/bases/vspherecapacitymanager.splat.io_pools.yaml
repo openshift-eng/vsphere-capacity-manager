@@ -88,105 +88,10 @@ spec:
           status:
             description: PoolStatus defines the status for a pool
             properties:
-              active-port-groups:
-                description: ActivePortGroups is the list of port groups that are
-                  currently in use
-                items:
-                  description: Network
-                  properties:
-                    cidr:
-                      description: Cidr represents the IPv4 network mask.
-                      type: integer
-                    cidrIPv6:
-                      description: CidrIPv6 represents the IPv6 network mask.
-                      type: integer
-                    dhcpEndLocation:
-                      description: DhcpEndLocation represents the DHCP end location.
-                      type: integer
-                    dnsServer:
-                      description: DnsServer represents the DNS server IP address.
-                      type: string
-                    gateway:
-                      description: Gateway represents the gateway IP address.
-                      type: string
-                    gatewayipv6:
-                      description: Gatewayipv6 represents the IPv6 gateway IP address.
-                      type: string
-                    ipAddresses:
-                      description: IpAddresses represents a list of IP addresses.
-                      items:
-                        type: string
-                      type: array
-                    ipv6prefix:
-                      description: Ipv6prefix represents the IPv6 prefix.
-                      type: string
-                    linkLocalIPv6:
-                      description: LinkLocalIPv6 represents the link local IPv6 address.
-                      type: string
-                    machineNetworkCidr:
-                      description: MachineNetworkCidr represents the machine network
-                        CIDR.
-                      type: string
-                    mask:
-                      description: Mask represents the network mask.
-                      type: string
-                    network:
-                      description: Network represents the network name.
-                      type: string
-                    priority:
-                      description: Priority represents the priority of the network.
-                      type: integer
-                    startIPv6Address:
-                      description: StartIPv6Address represents the start IPv6 address
-                        for DHCP.
-                      type: string
-                    stopIPv6Address:
-                      description: StopIPv6Address represents the stop IPv6 address
-                        for DHCP.
-                      type: string
-                    vifIPv6Address:
-                      description: VifIPv6Address represents the VIF IPv6 address.
-                      type: string
-                    vifIpAddress:
-                      description: VifIpAddress represents the VIF IP address.
-                      type: string
-                    virtualcenter:
-                      description: Virtualcenter represents the virtual center server.
-                      type: string
-                  type: object
-                type: array
               datastore-available:
                 description: StorageAvailable is the amount of storage in GB available
                   in the pool
                 type: integer
-              initialized:
-                description: Initialized is true when the pool has been initialize
-                type: boolean
-              leases:
-                description: Leases is the list of leases assigned to this pool
-                items:
-                  description: TypedLocalObjectReference contains enough information
-                    to let you locate the typed referenced object inside the same
-                    namespace.
-                  properties:
-                    apiGroup:
-                      description: APIGroup is the group for the resource being referenced.
-                        If APIGroup is not specified, the specified Kind must be in
-                        the core API group. For any other third-party types, APIGroup
-                        is required.
-                      type: string
-                    kind:
-                      description: Kind is the type of resource being referenced
-                      type: string
-                    name:
-                      description: Name is the name of resource being referenced
-                      type: string
-                  required:
-                  - kind
-                  - name
-                  type: object
-                  x-kubernetes-map-type: atomic
-                type: array
               memory-available:
                 description: MemoryAvailable is the amount of memory in GB available
                   in the pool
@@ -194,73 +99,6 @@ spec:
               network-available:
                 description: Networks is the number of networks available in the pool
                 type: integer
-              port-groups:
-                description: PortGroups is the list of port groups available in the
-                  pool
-                items:
-                  description: Network
-                  properties:
-                    cidr:
-                      description: Cidr represents the IPv4 network mask.
-                      type: integer
-                    cidrIPv6:
-                      description: CidrIPv6 represents the IPv6 network mask.
-                      type: integer
-                    dhcpEndLocation:
-                      description: DhcpEndLocation represents the DHCP end location.
-                      type: integer
-                    dnsServer:
-                      description: DnsServer represents the DNS server IP address.
-                      type: string
-                    gateway:
-                      description: Gateway represents the gateway IP address.
-                      type: string
-                    gatewayipv6:
-                      description: Gatewayipv6 represents the IPv6 gateway IP address.
-                      type: string
-                    ipAddresses:
-                      description: IpAddresses represents a list of IP addresses.
-                      items:
-                        type: string
-                      type: array
-                    ipv6prefix:
-                      description: Ipv6prefix represents the IPv6 prefix.
-                      type: string
-                    linkLocalIPv6:
-                      description: LinkLocalIPv6 represents the link local IPv6 address.
-                      type: string
-                    machineNetworkCidr:
-                      description: MachineNetworkCidr represents the machine network
-                        CIDR.
-                      type: string
-                    mask:
-                      description: Mask represents the network mask.
-                      type: string
-                    network:
-                      description: Network represents the network name.
-                      type: string
-                    priority:
-                      description: Priority represents the priority of the network.
-                      type: integer
-                    startIPv6Address:
-                      description: StartIPv6Address represents the start IPv6 address
-                        for DHCP.
-                      type: string
-                    stopIPv6Address:
-                      description: StopIPv6Address represents the stop IPv6 address
-                        for DHCP.
-                      type: string
-                    vifIPv6Address:
-                      description: VifIPv6Address represents the VIF IPv6 address.
-                      type: string
-                    vifIpAddress:
-                      description: VifIpAddress represents the VIF IP address.
-                      type: string
-                    virtualcenter:
-                      description: Virtualcenter represents the virtual center server.
-                      type: string
-                  type: object
-                type: array
               vcpus-available:
                 description: VCPUsAvailable is the number of vCPUs available in the
                   pool

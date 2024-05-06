@@ -1,0 +1,108 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.11.1
+  creationTimestamp: null
+  name: subnets.vspherecapacitymanager.splat.io
+spec:
+  group: vspherecapacitymanager.splat.io
+  names:
+    kind: Subnet
+    listKind: SubnetList
+    plural: subnets
+    singular: subnet
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: Subnet defines a pool of resources defined available for a given
+          vCenter, cluster, and datacenter
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: SubnetSpec defines the specification for a pool
+            properties:
+              cidr:
+                description: "The Classless Inter-Domain Routing prefix of this subnet,
+                  which specifies the range of spanned IP addresses. \n [Classless_Inter-Domain_Routing
+                  at Wikipedia](http://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing)"
+                type: integer
+              cidrIPv6:
+                description: CidrIPv6 represents the IPv6 network mask.
+                type: integer
+              datacenterName:
+                description: The DatacenterName is the datacenter that the firewall
+                  resides in.
+                type: string
+              gateway:
+                description: The IP address of this subnet reserved for use on the
+                  router as a gateway address and which is unavailable for other use.
+                type: string
+              gatewayipv6:
+                description: GatewayIPv6 represents the IPv6 gateway IP address.
+                type: string
+              ipAddressCount:
+                description: A count of the IP address records belonging to this subnet.
+                type: integer
+              ipAddresses:
+                description: The IP address records belonging to this subnet.
+                items:
+                  type: string
+                type: array
+              ipv6prefix:
+                description: Ipv6prefix represents the IPv6 prefix.
+                type: string
+              machineNetworkCidr:
+                description: MachineNetworkCidr represents the machine network CIDR.
+                type: string
+              netmask:
+                description: The bitmask in dotted-quad format for this subnet, which
+                  specifies the range of spanned IP addresses.
+                type: string
+              podName:
+                description: The PodName is the pod that this VLAN is associated with.
+                type: string
+              portGroupFullPath:
+                description: PortGroupFullPath is the govmomi-based full path of the
+                  network (port group) object
+                type: string
+              portGroupName:
+                description: PortGroupName is the non-pathed network (port group)
+                  name
+                type: string
+              startIPv6Address:
+                description: StartIPv6Address represents the start IPv6 address for
+                  DHCP.
+                type: string
+              subnetType:
+                type: string
+              vlanId:
+                type: string
+            required:
+            - datacenterName
+            - portGroupFullPath
+            - portGroupName
+            - vlanId
+            type: object
+          status:
+            description: SubnetStatus defines the status for a pool
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
