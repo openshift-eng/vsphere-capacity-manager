@@ -195,6 +195,9 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, fmt.Errorf("error updating lease, requeuing: %v", err)
 	}
 
+	if pool.Annotations == nil {
+		pool.Annotations = make(map[string]string)
+	}
 	pool.Annotations["last-updated"] = time.Now().Format(time.RFC3339)
 	err = l.Client.Update(ctx, pool)
 	if err != nil {
