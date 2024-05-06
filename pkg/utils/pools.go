@@ -62,6 +62,7 @@ func GetPoolWithStrategy(lease *v1.Lease, pools []*v1.Pool, strategy v1.Allocati
 			Name:       pool.Name,
 			UID:        pool.UID,
 		})
+		lease.Finalizers = append(lease.Finalizers, v1.LeaseFinalizer)
 		return pool, nil
 	}
 }

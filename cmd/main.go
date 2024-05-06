@@ -25,23 +25,17 @@ func main() {
 
 	v1.AddToScheme(mgr.GetScheme())
 
-	/*if err := (&controller.ResourceRequestReconciler{}).
+	if err := (&controller.PoolReconciler{}).
 		SetupWithManager(mgr); err != nil {
 		log.Printf("unable to create controller: %v", err)
 		os.Exit(1)
-	}*/
+	}
 
 	if err := (&controller.LeaseReconciler{}).
 		SetupWithManager(mgr); err != nil {
 		log.Printf("unable to create controller: %v", err)
 		os.Exit(1)
 	}
-
-	/*if err := (&controller.NamespaceTestReconciler{}).
-		SetupWithManager(mgr); err != nil {
-		log.Printf("unable to create controller: %v", err)
-		os.Exit(1)
-	}*/
 
 	if err := mgr.Start(signals.SetupSignalHandler()); err != nil {
 		log.Printf("could not start manager: %v", err)
