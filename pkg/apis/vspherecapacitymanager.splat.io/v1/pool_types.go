@@ -2,6 +2,8 @@ package v1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	configv1 "github.com/openshift/api/config/v1"
 )
 
 const (
@@ -32,20 +34,23 @@ type Pool struct {
 
 // PoolSpec defines the specification for a pool
 type PoolSpec struct {
+	configv1.VSpherePlatformFailureDomainSpec `json:",inline"`
 	// VCpus is the number of virtual CPUs
 	VCpus int `json:"vcpus"`
 	// Memory is the amount of memory in GB
 	Memory int `json:"memory"`
 	// Storage is the amount of storage in GB
 	Storage int `json:"storage"`
-	// Server the server that provisions resources for the pool
-	Server string `json:"server"`
-	// Datacenter associated with this pool
-	Datacenter string `json:"datacenter"`
-	// Cluster cluster associated with this pool
-	Cluster string `json:"cluster"`
-	// Datastore datastore associated with this pool
-	Datastore string `json:"datastore"`
+	/*
+		// Server the server that provisions resources for the pool
+		Server string `json:"server"`
+		// Datacenter associated with this pool
+		Datacenter string `json:"datacenter"`
+		// Cluster cluster associated with this pool
+		Cluster string `json:"cluster"`
+		// Datastore datastore associated with this pool
+		Datastore string `json:"datastore"`
+	*/
 	// Exclude when true, this pool is excluded from the default pools.
 	// This is useful if a job must be scheduled to a specific pool and that
 	// pool only has limited capacity.
