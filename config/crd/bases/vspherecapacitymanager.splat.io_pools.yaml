@@ -49,15 +49,6 @@ spec:
           spec:
             description: PoolSpec defines the specification for a pool
             properties:
-              cluster:
-                description: Cluster cluster associated with this pool
-                type: string
-              datacenter:
-                description: Datacenter associated with this pool
-                type: string
-              datastore:
-                description: Datastore datastore associated with this pool
-                type: string
               exclude:
                 description: Exclude when true, this pool is excluded from the default
                   pools. This is useful if a job must be scheduled to a specific pool
@@ -66,24 +57,120 @@ spec:
               memory:
                 description: Memory is the amount of memory in GB
                 type: integer
+              name:
+                description: name defines the arbitrary but unique name of a failure
+                  domain.
+                maxLength: 256
+                minLength: 1
+                type: string
+              region:
+                description: region defines the name of a region tag that will be
+                  attached to a vCenter datacenter. The tag category in vCenter must
+                  be named openshift-region.
+                maxLength: 80
+                minLength: 1
+                type: string
               server:
-                description: Server the server that provisions resources for the pool
+                description: server is the fully-qualified domain name or the IP address
+                  of the vCenter server. ---
+                maxLength: 255
+                minLength: 1
                 type: string
               storage:
                 description: Storage is the amount of storage in GB
                 type: integer
+              topology:
+                description: Topology describes a given failure domain using vSphere
+                  constructs
+                properties:
+                  computeCluster:
+                    description: computeCluster the absolute path of the vCenter cluster
+                      in which virtual machine will be located. The absolute path
+                      is of the form /<datacenter>/host/<cluster>. The maximum length
+                      of the path is 2048 characters.
+                    maxLength: 2048
+                    pattern: ^/.*?/host/.*?
+                    type: string
+                  datacenter:
+                    description: datacenter is the name of vCenter datacenter in which
+                      virtual machines will be located. The maximum length of the
+                      datacenter name is 80 characters.
+                    maxLength: 80
+                    type: string
+                  datastore:
+                    description: datastore is the absolute path of the datastore in
+                      which the virtual machine is located. The absolute path is of
+                      the form /<datacenter>/datastore/<datastore> The maximum length
+                      of the path is 2048 characters.
+                    maxLength: 2048
+                    pattern: ^/.*?/datastore/.*?
+                    type: string
+                  folder:
+                    description: folder is the absolute path of the folder where virtual
+                      machines are located. The absolute path is of the form /<datacenter>/vm/<folder>.
+                      The maximum length of the path is 2048 characters.
+                    maxLength: 2048
+                    pattern: ^/.*?/vm/.*?
+                    type: string
+                  networks:
+                    description: networks is the list of port group network names
+                      within this failure domain. Currently, we only support a single
+                      interface per RHCOS virtual machine. The available networks
+                      (port groups) can be listed using `govc ls 'network/*'` The
+                      single interface should be the absolute path of the form /<datacenter>/network/<portgroup>.
+                    items:
+                      type: string
+                    maxItems: 1
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  resourcePool:
+                    description: resourcePool is the absolute path of the resource
+                      pool where virtual machines will be created. The absolute path
+                      is of the form /<datacenter>/host/<cluster>/Resources/<resourcepool>.
+                      The maximum length of the path is 2048 characters.
+                    maxLength: 2048
+                    pattern: ^/.*?/host/.*?/Resources.*
+                    type: string
+                  template:
+                    description: "template is the full inventory path of the virtual
+                      machine or template that will be cloned when creating new machines
+                      in this failure domain. The maximum length of the path is 2048
+                      characters. \n When omitted, the template will be calculated
+                      by the control plane machineset operator based on the region
+                      and zone defined in VSpherePlatformFailureDomainSpec. For example,
+                      for zone=zonea, region=region1, and infrastructure name=test,
+                      the template path would be calculated as /<datacenter>/vm/test-rhcos-region1-zonea."
+                    maxLength: 2048
+                    minLength: 1
+                    pattern: ^/.*?/vm/.*?
+                    type: string
+                required:
+                - computeCluster
+                - datacenter
+                - datastore
+                - networks
+                type: object
               vcpus:
                 description: VCpus is the number of virtual CPUs
                 type: integer
+              zone:
+                description: zone defines the name of a zone tag that will be attached
+                  to a vCenter cluster. The tag category in vCenter must be named
+                  openshift-zone.
+                maxLength: 80
+                minLength: 1
+                type: string
             required:
-            - cluster
-            - datacenter
-            - datastore
             - exclude
             - memory
+            - name
+            - region
             - server
             - storage
+            - topology
             - vcpus
+            - zone
             type: object
           status:
             description: PoolStatus defines the status for a pool
@@ -92,67 +179,93 @@ spec:
                 description: ActivePortGroups is the list of port groups that are
                   currently in use
                 items:
-                  description: Network
+                  description: Network defines a pool of resources defined available
+                    for a given vCenter, cluster, and datacenter
                   properties:
-                    cidr:
-                      description: Cidr represents the IPv4 network mask.
-                      type: integer
-                    cidrIPv6:
-                      description: CidrIPv6 represents the IPv6 network mask.
-                      type: integer
-                    dhcpEndLocation:
-                      description: DhcpEndLocation represents the DHCP end location.
-                      type: integer
-                    dnsServer:
-                      description: DnsServer represents the DNS server IP address.
+                    apiVersion:
+                      description: 'APIVersion defines the versioned schema of this
+                        representation of an object. Servers should convert recognized
+                        schemas to the latest internal value, and may reject unrecognized
+                        values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
                       type: string
-                    gateway:
-                      description: Gateway represents the gateway IP address.
+                    kind:
+                      description: 'Kind is a string value representing the REST resource
+                        this object represents. Servers may infer this from the endpoint
+                        the client submits requests to. Cannot be updated. In CamelCase.
+                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
                       type: string
-                    gatewayipv6:
-                      description: Gatewayipv6 represents the IPv6 gateway IP address.
-                      type: string
-                    ipAddresses:
-                      description: IpAddresses represents a list of IP addresses.
-                      items:
-                        type: string
-                      type: array
-                    ipv6prefix:
-                      description: Ipv6prefix represents the IPv6 prefix.
-                      type: string
-                    linkLocalIPv6:
-                      description: LinkLocalIPv6 represents the link local IPv6 address.
-                      type: string
-                    machineNetworkCidr:
-                      description: MachineNetworkCidr represents the machine network
-                        CIDR.
-                      type: string
-                    mask:
-                      description: Mask represents the network mask.
-                      type: string
-                    network:
-                      description: Network represents the network name.
-                      type: string
-                    priority:
-                      description: Priority represents the priority of the network.
-                      type: integer
-                    startIPv6Address:
-                      description: StartIPv6Address represents the start IPv6 address
-                        for DHCP.
-                      type: string
-                    stopIPv6Address:
-                      description: StopIPv6Address represents the stop IPv6 address
-                        for DHCP.
-                      type: string
-                    vifIPv6Address:
-                      description: VifIPv6Address represents the VIF IPv6 address.
-                      type: string
-                    vifIpAddress:
-                      description: VifIpAddress represents the VIF IP address.
-                      type: string
-                    virtualcenter:
-                      description: Virtualcenter represents the virtual center server.
-                      type: string
+                    metadata:
+                      type: object
+                    spec:
+                      description: NetworkSpec defines the specification for a pool
+                      properties:
+                        cidr:
+                          description: "The Classless Inter-Domain Routing prefix
+                            of this subnet, which specifies the range of spanned IP
+                            addresses. \n [Classless_Inter-Domain_Routing at Wikipedia](http://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing)"
+                          type: integer
+                        cidrIPv6:
+                          description: CidrIPv6 represents the IPv6 network mask.
+                          type: integer
+                        datacenterName:
+                          description: The DatacenterName is the datacenter that the
+                            firewall resides in.
+                          type: string
+                        gateway:
+                          description: The IP address of this subnet reserved for
+                            use on the router as a gateway address and which is unavailable
+                            for other use.
+                          type: string
+                        gatewayipv6:
+                          description: GatewayIPv6 represents the IPv6 gateway IP
+                            address.
+                          type: string
+                        ipAddressCount:
+                          description: A count of the IP address records belonging
+                            to this subnet.
+                          type: integer
+                        ipAddresses:
+                          description: The IP address records belonging to this subnet.
+                          items:
+                            type: string
+                          type: array
+                        ipv6prefix:
+                          description: Ipv6prefix represents the IPv6 prefix.
+                          type: string
+                        machineNetworkCidr:
+                          description: MachineNetworkCidr represents the machine network
+                            CIDR.
+                          type: string
+                        netmask:
+                          description: The bitmask in dotted-quad format for this
+                            subnet, which specifies the range of spanned IP addresses.
+                          type: string
+                        podName:
+                          description: The PodName is the pod that this VLAN is associated
+                            with.
+                          type: string
+                        portGroupName:
+                          description: PortGroupName is the non-pathed network (port
+                            group) name
+                          type: string
+                        startIPv6Address:
+                          description: StartIPv6Address represents the start IPv6
+                            address for DHCP.
+                          type: string
+                        subnetType:
+                          type: string
+                        vlanId:
+                          type: string
+                      required:
+                      - datacenterName
+                      - portGroupName
+                      - vlanId
+                      type: object
+                    status:
+                      description: NetworkStatus defines the status for a pool
+                      type: object
+                  required:
+                  - spec
                   type: object
                 type: array
               datastore-available:
@@ -198,67 +311,93 @@ spec:
                 description: PortGroups is the list of port groups available in the
                   pool
                 items:
-                  description: Network
+                  description: Network defines a pool of resources defined available
+                    for a given vCenter, cluster, and datacenter
                   properties:
-                    cidr:
-                      description: Cidr represents the IPv4 network mask.
-                      type: integer
-                    cidrIPv6:
-                      description: CidrIPv6 represents the IPv6 network mask.
-                      type: integer
-                    dhcpEndLocation:
-                      description: DhcpEndLocation represents the DHCP end location.
-                      type: integer
-                    dnsServer:
-                      description: DnsServer represents the DNS server IP address.
+                    apiVersion:
+                      description: 'APIVersion defines the versioned schema of this
+                        representation of an object. Servers should convert recognized
+                        schemas to the latest internal value, and may reject unrecognized
+                        values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
                       type: string
-                    gateway:
-                      description: Gateway represents the gateway IP address.
+                    kind:
+                      description: 'Kind is a string value representing the REST resource
+                        this object represents. Servers may infer this from the endpoint
+                        the client submits requests to. Cannot be updated. In CamelCase.
+                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
                       type: string
-                    gatewayipv6:
-                      description: Gatewayipv6 represents the IPv6 gateway IP address.
-                      type: string
-                    ipAddresses:
-                      description: IpAddresses represents a list of IP addresses.
-                      items:
-                        type: string
-                      type: array
-                    ipv6prefix:
-                      description: Ipv6prefix represents the IPv6 prefix.
-                      type: string
-                    linkLocalIPv6:
-                      description: LinkLocalIPv6 represents the link local IPv6 address.
-                      type: string
-                    machineNetworkCidr:
-                      description: MachineNetworkCidr represents the machine network
-                        CIDR.
-                      type: string
-                    mask:
-                      description: Mask represents the network mask.
-                      type: string
-                    network:
-                      description: Network represents the network name.
-                      type: string
-                    priority:
-                      description: Priority represents the priority of the network.
-                      type: integer
-                    startIPv6Address:
-                      description: StartIPv6Address represents the start IPv6 address
-                        for DHCP.
-                      type: string
-                    stopIPv6Address:
-                      description: StopIPv6Address represents the stop IPv6 address
-                        for DHCP.
-                      type: string
-                    vifIPv6Address:
-                      description: VifIPv6Address represents the VIF IPv6 address.
-                      type: string
-                    vifIpAddress:
-                      description: VifIpAddress represents the VIF IP address.
-                      type: string
-                    virtualcenter:
-                      description: Virtualcenter represents the virtual center server.
-                      type: string
+                    metadata:
+                      type: object
+                    spec:
+                      description: NetworkSpec defines the specification for a pool
+                      properties:
+                        cidr:
+                          description: "The Classless Inter-Domain Routing prefix
+                            of this subnet, which specifies the range of spanned IP
+                            addresses. \n [Classless_Inter-Domain_Routing at Wikipedia](http://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing)"
+                          type: integer
+                        cidrIPv6:
+                          description: CidrIPv6 represents the IPv6 network mask.
+                          type: integer
+                        datacenterName:
+                          description: The DatacenterName is the datacenter that the
+                            firewall resides in.
+                          type: string
+                        gateway:
+                          description: The IP address of this subnet reserved for
+                            use on the router as a gateway address and which is unavailable
+                            for other use.
+                          type: string
+                        gatewayipv6:
+                          description: GatewayIPv6 represents the IPv6 gateway IP
+                            address.
+                          type: string
+                        ipAddressCount:
+                          description: A count of the IP address records belonging
+                            to this subnet.
+                          type: integer
+                        ipAddresses:
+                          description: The IP address records belonging to this subnet.
+                          items:
+                            type: string
+                          type: array
+                        ipv6prefix:
+                          description: Ipv6prefix represents the IPv6 prefix.
+                          type: string
+                        machineNetworkCidr:
+                          description: MachineNetworkCidr represents the machine network
+                            CIDR.
+                          type: string
+                        netmask:
+                          description: The bitmask in dotted-quad format for this
+                            subnet, which specifies the range of spanned IP addresses.
+                          type: string
+                        podName:
+                          description: The PodName is the pod that this VLAN is associated
+                            with.
+                          type: string
+                        portGroupName:
+                          description: PortGroupName is the non-pathed network (port
+                            group) name
+                          type: string
+                        startIPv6Address:
+                          description: StartIPv6Address represents the start IPv6
+                            address for DHCP.
+                          type: string
+                        subnetType:
+                          type: string
+                        vlanId:
+                          type: string
+                      required:
+                      - datacenterName
+                      - portGroupName
+                      - vlanId
+                      type: object
+                    status:
+                      description: NetworkStatus defines the status for a pool
+                      type: object
+                  required:
+                  - spec
                   type: object
                 type: array
               vcpus-available:
