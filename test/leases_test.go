@@ -109,6 +109,13 @@ var _ = Describe("Lease management", func() {
 		// Wait for the mgrDone to be closed, which will happen once the mgr has stopped
 		<-mgrDone
 
+		pools := &v1.PoolList{}
+		Expect(k8sClient.List(ctx, pools, client.InNamespace(namespaceName))).To(Succeed())
+		for _, lease := range pools.Items {
+			lease.ObjectMeta.Finalizers = []string{}
+			Expect(k8sClient.Update(ctx, &lease)).To(Succeed())
+		}
+
 		leases := &v1.LeaseList{}
 		Expect(k8sClient.List(ctx, leases, client.InNamespace(namespaceName))).To(Succeed())
 		for _, lease := range leases.Items {

@@ -51,41 +51,69 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	log.Print("Reconciling pool")
 	defer log.Print("Finished reconciling pool")
 
-	// Fetch the Lease instance.
+	poolKey := fmt.Sprintf("%s/%s", req.Namespace, req.Name)
+
+	// Fetch the Pool instance.
 	pool := &v1.Pool{}
 	if err := l.Get(ctx, req.NamespacedName, pool); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	var leases v1.LeaseList
-	err := l.Client.List(ctx, &leases, client.InNamespace(req.Namespace))
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to list leases: %w", err)
+	if pool.DeletionTimestamp != nil {
+		log.Print("Pool is being deleted")
+		if pool.Finalizers != nil {
+			pool.Finalizers = nil
+			err := l.Update(ctx, pool)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("error updating pool: %w", err)
+			}
+		}
+		poolsMu.Lock()
+		delete(pools, poolKey)
+		poolsMu.Unlock()
+		return ctrl.Result{}, nil
 	}
 
-	vcpus := 0
-	memory := 0
-	networks := 0
-	for _, lease := range leases.Items {
-		if lease.Status.Phase != v1.PHASE_FULFILLED || lease.DeletionTimestamp != nil {
-			continue
+	if pool.Finalizers == nil {
+		log.Print("setting finalizer on pool")
+		pool.Finalizers = []string{v1.PoolFinalizer}
+		err := l.Client.Update(ctx, pool)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("error setting pool finalizer: %w", err)
 		}
-		log.Printf("checking lease status: %+v", lease)
-		for _, ownerRef := range lease.OwnerReferences {
-			if ownerRef.Kind == pool.Kind && ownerRef.Name == pool.Name {
-				vcpus += lease.Spec.VCpus
-				memory += lease.Spec.Memory
-				networks += lease.Spec.Networks
-				break
+	}
+
+	if !pool.Status.Initialized {
+		pool.Status.VCpusAvailable = pool.Spec.VCpus
+		pool.Status.MemoryAvailable = pool.Spec.Memory
+		pool.Status.Initialized = true
+		err := l.Client.Status().Update(ctx, pool)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("error initializing pool status: %w", err)
+		}
+		poolsMu.Lock()
+		pools[poolKey] = pool
+		poolsMu.Unlock()
+	} else {
+		log.Print("pool is initialized, updating status")
+		poolsMu.Lock()
+		cachedPool, inCache := pools[poolKey]
+		if inCache {
+			if (cachedPool.Status.VCpusAvailable == pool.Status.VCpusAvailable) &&
+				(cachedPool.Status.MemoryAvailable == pool.Status.MemoryAvailable) {
+				cachedPool.Status.DeepCopyInto(&pool.Status)
+			} else {
+				cachedPool = nil
+			}
+		}
+		poolsMu.Unlock()
+		if cachedPool != nil {
+			err := l.Client.Status().Update(ctx, pool)
+			if err != nil {
+				return ctrl.Result{}, fmt.Errorf("error initializing pool status: %w", err)
 			}
 		}
 	}
-	pool.Status.VCpusAvailable = pool.Spec.VCpus - vcpus
-	pool.Status.MemoryAvailable = pool.Spec.Memory - memory
 
-	err = l.Client.Status().Update(ctx, pool)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("error updating pool status: %w", err)
-	}
 	return ctrl.Result{}, nil
 }

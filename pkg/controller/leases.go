@@ -6,6 +6,7 @@ import (
 	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/utils"
 	"k8s.io/apimachinery/pkg/types"
 	"log"
+	"sync"
 	"time"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
@@ -14,6 +15,12 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+var (
+	poolsMu sync.Mutex
+	pools   = make(map[string]*v1.Pool)
+	leases  = make(map[string]*v1.Lease)
 )
 
 type LeaseReconciler struct {
@@ -47,35 +54,23 @@ func (l *LeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	l.Scheme = mgr.GetScheme()
 	l.Recorder = mgr.GetEventRecorderFor("leases-controller")
 	l.RESTMapper = mgr.GetRESTMapper()
-
+	poolsMu.Lock()
+	leases = make(map[string]*v1.Lease)
+	pools = make(map[string]*v1.Pool)
+	poolsMu.Unlock()
 	return nil
 }
 
 // reconcilePoolStates updates the states of all pools. this ensures we have the most up-to-date state of the pools
 // before we attempt to reconcile any leases. the pool resource statuses are not updated.
-func (l *LeaseReconciler) reconcilePoolStates(ctx context.Context, req ctrl.Request) ([]*v1.Pool, error) {
-	pools := v1.PoolList{}
-	err := l.Client.List(ctx, &pools)
-	if err != nil {
-		return nil, fmt.Errorf("error listing pools: %w", err)
-	}
-
+func (l *LeaseReconciler) reconcilePoolStates() []*v1.Pool {
 	var outList []*v1.Pool
-	var leases v1.LeaseList
-	err = l.Client.List(ctx, &leases, client.InNamespace(req.Namespace))
-	if err != nil {
-		return nil, fmt.Errorf("error listing leases: %w", err)
-	}
 
-	for idx, pool := range pools.Items {
+	for poolName, pool := range pools {
 		vcpus := 0
 		memory := 0
 		networks := 0
-		for _, lease := range leases.Items {
-			if lease.Status.Phase != v1.PHASE_FULFILLED {
-				continue
-			}
-			log.Printf("checking lease status: %+v", lease)
+		for _, lease := range leases {
 			for _, ownerRef := range lease.OwnerReferences {
 				if ownerRef.Kind == pool.Kind && ownerRef.Name == pool.Name {
 					vcpus += lease.Spec.VCpus
@@ -87,10 +82,11 @@ func (l *LeaseReconciler) reconcilePoolStates(ctx context.Context, req ctrl.Requ
 		}
 		pool.Status.VCpusAvailable = pool.Spec.VCpus - vcpus
 		pool.Status.MemoryAvailable = pool.Spec.Memory - memory
-		outList = append(outList, &pools.Items[idx])
+		pools[poolName] = pool
+		outList = append(outList, pool)
 	}
 
-	return outList, nil
+	return outList
 }
 
 func (l *LeaseReconciler) bumpPool(ctx context.Context, lease *v1.Lease) error {
@@ -120,9 +116,11 @@ func (l *LeaseReconciler) bumpPool(ctx context.Context, lease *v1.Lease) error {
 }
 
 func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	var err error
 	log.Print("Reconciling lease")
 	defer log.Print("Finished reconciling lease")
 
+	leaseKey := fmt.Sprintf("%s/%s", req.Namespace, req.Name)
 	// Fetch the Lease instance.
 	lease := &v1.Lease{}
 	if err := l.Get(ctx, req.NamespacedName, lease); err != nil {
@@ -131,36 +129,28 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if lease.DeletionTimestamp != nil {
 		log.Print("Lease is being deleted")
-		err := l.bumpPool(ctx, lease)
-		if err != nil {
-			log.Printf("error updating pool: %v", err)
-			return ctrl.Result{}, err
-		}
-
 		lease.Finalizers = []string{}
-		err = l.Update(ctx, lease)
+		err := l.Update(ctx, lease)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("error updating lease: %w", err)
+			return ctrl.Result{}, fmt.Errorf("error dropping finalizers from lease: %w", err)
 		}
-		return ctrl.Result{}, err
+		poolsMu.Lock()
+		delete(leases, leaseKey)
+		l.reconcilePoolStates()
+		poolsMu.Unlock()
+		return ctrl.Result{}, nil
 	}
+
+	poolsMu.Lock()
+	leases[leaseKey] = lease
+	poolsMu.Unlock()
 
 	if lease.Status.Phase == v1.PHASE_FULFILLED {
 		log.Print("lease is already fulfilled")
 		return ctrl.Result{}, nil
 	}
 
-	pools := v1.PoolList{}
-	err := l.Client.List(ctx, &pools)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("error listing pools, requeuing: %v", err)
-	}
-
-	updatedPools, err := l.reconcilePoolStates(ctx, req)
-	if err != nil {
-
-		return ctrl.Result{}, fmt.Errorf("error updating pool states, requeuing: %v", err)
-	}
+	updatedPools := l.reconcilePoolStates()
 
 	lease.Status.Phase = v1.PHASE_PENDING
 
@@ -172,9 +162,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				log.Printf("unable to update lease: %v", err)
 			}
 
-			return ctrl.Result{
-				RequeueAfter: 5 * time.Second,
-			}, fmt.Errorf("unable to get matching pool: %v", err)
+			return ctrl.Result{}, fmt.Errorf("unable to get matching pool: %v", err)
 		}
 	} else {
 		err = l.Get(ctx, types.NamespacedName{
@@ -189,6 +177,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("error updating lease, requeuing: %v", err)
 	}
+
 	lease.Status.Phase = v1.PHASE_FULFILLED
 	err = l.Client.Status().Update(ctx, lease)
 	if err != nil {
@@ -198,10 +187,12 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if pool.Annotations == nil {
 		pool.Annotations = make(map[string]string)
 	}
-	pool.Annotations["last-updated"] = time.Now().Format(time.RFC3339)
-	err = l.Client.Update(ctx, pool)
+
+	err = l.bumpPool(ctx, lease)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("error updating pool, requeuing: %v", err)
+		log.Printf("error bumping pool: %v", err)
+		return ctrl.Result{}, err
 	}
+
 	return ctrl.Result{}, nil
 }

@@ -92,6 +92,9 @@ spec:
                 description: StorageAvailable is the amount of storage in GB available
                   in the pool
                 type: integer
+              initialized:
+                description: Initialized when true, the status fields have been initialized
+                type: boolean
               memory-available:
                 description: MemoryAvailable is the amount of memory in GB available
                   in the pool

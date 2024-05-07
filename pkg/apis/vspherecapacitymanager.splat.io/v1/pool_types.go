@@ -66,6 +66,10 @@ type PoolStatus struct {
 	// Networks is the number of networks available in the pool
 	// +optional
 	NetworkAvailable int `json:"network-available"`
+
+	// Initialized when true, the status fields have been initialized
+	// +optional
+	Initialized bool `json:"initialized"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
