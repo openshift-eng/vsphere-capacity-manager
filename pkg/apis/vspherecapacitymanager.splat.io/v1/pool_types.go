@@ -1,7 +1,6 @@
 package v1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -64,19 +63,11 @@ type PoolStatus struct {
 	// StorageAvailable is the amount of storage in GB available in the pool
 	// +optional
 	DatastoreAvailable int `json:"datastore-available"`
-	// Leases is the list of leases assigned to this pool
-	// +optional
-	Leases []*corev1.TypedLocalObjectReference `json:"leases"`
 	// Networks is the number of networks available in the pool
 	// +optional
 	NetworkAvailable int `json:"network-available"`
-	// PortGroups is the list of port groups available in the pool
-	// +optional
-	PortGroups []Network `json:"port-groups"`
-	// ActivePortGroups is the list of port groups that are currently in use
-	// +optional
-	ActivePortGroups []Network `json:"active-port-groups"`
-	// Initialized is true when the pool has been initialize
+
+	// Initialized when true, the status fields have been initialized
 	// +optional
 	Initialized bool `json:"initialized"`
 }

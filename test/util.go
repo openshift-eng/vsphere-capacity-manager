@@ -1,13 +1,9 @@
 package test
 
 import (
-	"context"
 	"fmt"
-
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type shape int64
@@ -18,71 +14,62 @@ const (
 	SHAPE_LARGE  = shape(100)
 )
 
-type resourceRequest struct {
-	request v1.ResourceRequest
+type lease struct {
+	lease v1.Lease
 }
 
-// getResourceRequest returns a ResourceRequest object for testing
-func GetResourceRequest() *resourceRequest {
-	return &resourceRequest{
-		request: v1.ResourceRequest{
+// GetLease returns a Lease object for testing
+func GetLease() *lease {
+	return &lease{
+		lease: v1.Lease{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "sample-request-0",
-				Namespace: "default",
+				GenerateName: "sample-lease-",
+				Namespace:    "default",
 			},
 		},
 	}
 }
 
-func (r *resourceRequest) WithName(name string) *resourceRequest {
-	r.request.ObjectMeta.Name = name
+func (r *lease) WithName(name string) *lease {
+	r.lease.ObjectMeta.Name = name
 	return r
 }
 
-func (r *resourceRequest) WithPoolCount(cnt int) *resourceRequest {
-	r.request.Spec.VCenters = cnt
-	return r
-}
-
-func (r *resourceRequest) WithShape(shape shape) *resourceRequest {
-	r.request.Spec.VCpus = int(16 * int64(shape))
-	r.request.Spec.Memory = int(16 * int64(shape))
-	r.request.Spec.Storage = int(120 * int64(shape))
-	r.request.Spec.Networks = int(1 * int64(shape))
+func (r *lease) WithShape(shape shape) *lease {
+	r.lease.Spec.VCpus = int(16 * int64(shape))
+	r.lease.Spec.Memory = int(16 * int64(shape))
+	r.lease.Spec.Storage = int(120 * int64(shape))
+	r.lease.Spec.Networks = int(1 * int64(shape))
 
 	return r
 }
 
-func (r *resourceRequest) WithPool(pool string) *resourceRequest {
-	r.request.Spec.RequiredPool = pool
+func (r *lease) WithPool(pool string) *lease {
+	r.lease.Spec.RequiredPool = pool
 	return r
 }
 
-func (r *resourceRequest) Build() *v1.ResourceRequest {
-	if r.request.Spec.VCenters == 0 {
-		r.request.Spec.VCenters = 1
+func (r *lease) Build() *v1.Lease {
+	return &r.lease
+}
+
+// DoesLeaseHavePool checks if the lease is reflected in the pool
+func DoesLeaseHavePool(lease *v1.Lease) (bool, error) {
+	if lease.Status.Phase != v1.PHASE_FULFILLED {
+		return false, fmt.Errorf("lease %s has not been fulfilled", lease.Name)
 	}
-	return &r.request
-}
 
-// IsLeaseReflectedInPool checks if the lease is reflected in the pool
-func IsLeaseReflectedInPool(ctx context.Context, client client.Client, lease *v1.Lease) (bool, error) {
-	if lease.Status.Pool == nil {
-		return false, fmt.Errorf("lease %s does not have an associated pool", lease.Name)
-	}
-	pool := &v1.Pool{}
-	if err := client.Get(ctx, types.NamespacedName{Name: lease.Status.Pool.Name, Namespace: lease.Namespace}, pool); err != nil {
-		return false, fmt.Errorf("error getting pool: %w", err)
-	}
-	for _, ref := range pool.Status.Leases {
-		if ref.Name == lease.Name {
-			if pool.Status.VCpusAvailable == pool.Spec.VCpus-lease.Spec.VCpus ||
-				pool.Status.MemoryAvailable == pool.Spec.Memory-lease.Spec.Memory ||
-				pool.Status.DatastoreAvailable == pool.Spec.Storage-lease.Spec.Storage ||
-				pool.Status.NetworkAvailable == pool.Status.NetworkAvailable-len(lease.Status.PortGroups) {
-				return true, nil
-			}
+	var ref *metav1.OwnerReference
+	for _, ownerRef := range lease.OwnerReferences {
+		if ownerRef.Kind == "Pool" {
+			ref = &ownerRef
 		}
 	}
-	return false, nil
+
+	if ref == nil {
+		return false, fmt.Errorf("failed to find pool owner reference for lease %s", lease.Name)
+	}
+
+	return true, nil
+
 }

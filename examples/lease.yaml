@@ -1,0 +1,10 @@
+apiVersion: vspherecapacitymanager.splat.io/v1
+kind: Lease
+metadata:
+  name: sample-lease-0
+  namespace: default
+spec:
+  vcpus: 24
+  memory: 96
+  networks: 1
+  storage: 2000

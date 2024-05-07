@@ -1,0 +1,14 @@
+apiVersion: vspherecapacitymanager.splat.io/v1
+kind: Pool
+metadata:
+  name: sample-pool-0
+  namespace: default
+spec:
+  vcpus: 256
+  memory: 768
+  cluster: "/datacenter/host/cluster-1"
+  datastore: "/datacenter/datastore/datastore-1"
+  datacenter: "datacenter"
+  server: "vcenter-1"
+  exclude: false
+  storage: 2000
