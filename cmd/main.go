@@ -23,7 +23,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	v1.AddToScheme(mgr.GetScheme())
+	err = v1.AddToScheme(mgr.GetScheme())
+	if err != nil {
+		log.Printf("could not add types to scheme: %v", err)
+		os.Exit(1)
+	}
 
 	if err := (&controller.PoolReconciler{}).
 		SetupWithManager(mgr); err != nil {
