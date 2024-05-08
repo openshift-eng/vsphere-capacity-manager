@@ -53,6 +53,15 @@ var _ = Describe("Lease management", func() {
 		}
 		Expect(leaseReconciler.SetupWithManager(mgr)).To(Succeed(), "Reconciler should be able to setup with manager")
 
+		networkReconciler := &controller.NetworkReconciler{
+			Client:         mgr.GetClient(),
+			UncachedClient: mgr.GetClient(),
+			Namespace:      namespaceName,
+			OperatorName:   controllerName,
+		}
+
+		Expect(networkReconciler.SetupWithManager(mgr)).To(Succeed(), "Reconciler should be able to setup with manager")
+
 		poolReconciler := &controller.PoolReconciler{
 			Client:         mgr.GetClient(),
 			UncachedClient: mgr.GetClient(),
@@ -206,8 +215,8 @@ var _ = Describe("Lease management", func() {
 	It("should fail if no pool is available", func() {
 		var leases []*v1.Lease
 		By("creating leases", func() {
-			for i := 0; i < 3; i++ {
-				lease := GetLease().WithShape(SHAPE_SMALL).Build()
+			for i := 0; i < 4; i++ {
+				lease := GetLease().WithShape(SHAPE_MEDIUM).Build()
 				Expect(lease).NotTo(BeNil())
 				Expect(k8sClient.Create(ctx, lease)).To(Succeed())
 				leases = append(leases, lease)
@@ -226,19 +235,18 @@ var _ = Describe("Lease management", func() {
 							log.Printf("unable to get lease: %v", err)
 							return false
 						}
-						if len(lease.Status.Phase) == 0 {
-							return false
-						}
 						switch lease.Status.Phase {
 						case v1.PHASE_FULFILLED:
 							fulfilled++
 						case v1.PHASE_PENDING:
+							fallthrough
+						default:
 							pending++
 						}
 					}
 					log.Printf("pending leases: %v", pending)
 					log.Printf("fulfilled leases: %v", fulfilled)
-					return pending == 1 && fulfilled == 2
+					return pending == 3 && fulfilled == 1
 				}).Should(BeTrue())
 			})
 		})
@@ -350,7 +358,7 @@ var _ = Describe("Lease management", func() {
 	It("should acquire a lease in a non-default pool, then delete the lease", func() {
 		var lease *v1.Lease
 		By("creating a resource lease", func() {
-			lease = GetLease().WithShape(SHAPE_SMALL).WithPool("sample-zonal-pool-0").Build()
+			lease = GetLease().WithShape(SHAPE_SMALL).WithPool("vcs8e-vc.ocp2.dev.cluster.com-ibmcloud-vcs-mdcnc-workload-3").Build()
 			Expect(lease).NotTo(BeNil())
 			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
 		})

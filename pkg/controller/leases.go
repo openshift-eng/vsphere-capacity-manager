@@ -6,7 +6,7 @@ import (
 	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/utils"
 	"k8s.io/apimachinery/pkg/types"
 	"log"
-	"sync"
+	"strings"
 	"time"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
@@ -15,12 +15,6 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-)
-
-var (
-	poolsMu sync.Mutex
-	pools   = make(map[string]*v1.Pool)
-	leases  = make(map[string]*v1.Lease)
 )
 
 type LeaseReconciler struct {
@@ -57,8 +51,49 @@ func (l *LeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	poolsMu.Lock()
 	leases = make(map[string]*v1.Lease)
 	pools = make(map[string]*v1.Pool)
+	networks = make(map[string]*v1.Network)
 	poolsMu.Unlock()
 	return nil
+}
+
+// getAvailableNetworks retrieves networks which are not owned by a lease
+func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool) []*v1.Network {
+	networksInPool := make(map[string]*v1.Network)
+	availableNetworks := make([]*v1.Network, 0)
+	for _, portGroupPath := range pool.Spec.Topology.Networks {
+		pathParts := strings.Split(portGroupPath, "/")
+		var lastToken string
+		if len(pathParts) == 3 {
+			lastToken = pathParts[2]
+		}
+
+		for _, network := range networks {
+			if network.Name == lastToken {
+				networksInPool[network.Name] = network
+				break
+			}
+		}
+	}
+
+	for _, network := range networksInPool {
+		hasOwner := false
+		for _, lease := range leases {
+			for _, ownerRef := range lease.OwnerReferences {
+				if ownerRef.Name == network.Name &&
+					ownerRef.Kind == network.Kind {
+					hasOwner = true
+					break
+				}
+			}
+			if hasOwner {
+				break
+			}
+		}
+		if !hasOwner {
+			availableNetworks = append(availableNetworks, network)
+		}
+	}
+	return availableNetworks
 }
 
 // reconcilePoolStates updates the states of all pools. this ensures we have the most up-to-date state of the pools
@@ -150,11 +185,13 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
+	poolsMu.Lock()
 	updatedPools := l.reconcilePoolStates()
+	poolsMu.Unlock()
 
 	lease.Status.Phase = v1.PHASE_PENDING
 
-	var pool *v1.Pool
+	pool := &v1.Pool{}
 	if ref := utils.DoesLeaseHavePool(lease); ref == nil {
 		pool, err = utils.GetPoolWithStrategy(lease, updatedPools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
 		if err != nil {
@@ -173,11 +210,35 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, fmt.Errorf("error getting pool: %v", err)
 		}
 	}
+
+	/*if !utils.DoesLeaseHaveNetworks(lease) {
+		poolsMu.Lock()
+		availableNetworks := l.getAvailableNetworks(pool)
+		poolsMu.Unlock()
+
+		if len(availableNetworks) < lease.Spec.Networks {
+			if l.Client.Status().Update(ctx, lease) != nil {
+				log.Printf("unable to update lease: %v", err)
+			}
+			return ctrl.Result{}, fmt.Errorf("lease requires %d networks, %d networks available", lease.Spec.Networks, len(availableNetworks))
+		}
+
+		for _, network := range availableNetworks {
+			lease.OwnerReferences = append(lease.OwnerReferences, metav1.OwnerReference{
+				APIVersion: network.APIVersion,
+				Kind:       network.Kind,
+				Name:       network.Name,
+			})
+		}
+	}*/
+
+	leaseStatus := lease.Status.DeepCopy()
 	err = l.Client.Update(ctx, lease)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("error updating lease, requeuing: %v", err)
 	}
 
+	leaseStatus.DeepCopyInto(&lease.Status)
 	lease.Status.Phase = v1.PHASE_FULFILLED
 	err = l.Client.Status().Update(ctx, lease)
 	if err != nil {

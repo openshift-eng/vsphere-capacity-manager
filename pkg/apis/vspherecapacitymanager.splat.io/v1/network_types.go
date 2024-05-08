@@ -4,6 +4,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	NETWORKS_LAST_LEASE_UPDATE_ANNOTATION = "vspherecapacitymanager.splat.io/last-network-update"
+	NetworkFinalizer                      = "vsphere-capacity-manager.splat-team.io/network-finalizer"
+)
+
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 

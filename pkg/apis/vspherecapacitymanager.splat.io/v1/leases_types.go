@@ -1,6 +1,7 @@
 package v1
 
 import (
+	configv1 "github.com/openshift/api/config/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -8,7 +9,6 @@ const (
 	LeaseKind      = "Lease"
 	APIGroupName   = "vsphere-capacity-manager.splat-team.io"
 	LeaseFinalizer = "vsphere-capacity-manager.splat-team.io/lease-finalizer"
-	PoolFinalizer  = "vsphere-capacity-manager.splat-team.io/pool-finalizer"
 )
 
 // +genclient
@@ -47,13 +47,18 @@ type LeaseSpec struct {
 	// pool
 	// +optional
 	RequiredPool string `json:"required-pool,omitempty"`
+	// BoskosLeaseID is the ID of the lease in Boskos associated with this lease
+	// +optional
+	BoskosLeaseID string `json:"boskos-lease-id,omitempty"`
 }
 
 // LeaseStatus defines the status for a lease
 type LeaseStatus struct {
-	// BoskosLeaseID is the ID of the lease in Boskos associated with this lease
-	// +optional
-	BoskosLeaseID string `json:"boskos-lease-id,omitempty"`
+	configv1.VSpherePlatformFailureDomainSpec `json:",inline"`
+
+	// EnvVars a freeform string which contains bash which is to be sourced
+	// by the holder of the lease.
+	EnvVars string `json:"envVars,omitempty"`
 
 	// Phase is the current phase of the lease
 	// +optional

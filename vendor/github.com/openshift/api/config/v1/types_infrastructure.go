@@ -1210,7 +1210,6 @@ type VSpherePlatformTopology struct {
 	// The single interface should be the absolute path of the form
 	// /<datacenter>/network/<portgroup>.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MaxItems=1
 	// +kubebuilder:validation:MinItems=1
 	// +listType=atomic
 	Networks []string `json:"networks"`
