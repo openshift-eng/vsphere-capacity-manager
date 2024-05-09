@@ -51,6 +51,20 @@ spec:
                   pools. This is useful if a job must be scheduled to a specific pool
                   and that pool only has limited capacity.
                 type: boolean
+              ibmPoolSpec:
+                description: IBMPoolSpec topology information associated with this
+                  pool
+                properties:
+                  datacenter:
+                    description: Pod the pod in the datacenter where the vCenter resides
+                    type: string
+                  pod:
+                    description: Pod the pod in the datacenter where the vCenter resides
+                    type: string
+                required:
+                - datacenter
+                - pod
+                type: object
               memory:
                 description: Memory is the amount of memory in GB
                 type: integer

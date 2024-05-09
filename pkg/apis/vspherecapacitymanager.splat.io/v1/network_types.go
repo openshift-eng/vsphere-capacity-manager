@@ -17,8 +17,7 @@ const (
 // +kubebuilder:object:root=true
 // +kubebuilder:scope=Namespaced
 // +kubebuilder:printcolumn:name="Port Group",type=string,JSONPath=`.spec.portGroupName`
-// +kubebuilder:printcolumn:name="Datacenter",type=string,JSONPath=`.spec.datacenterName`
-// +kubebuilder:printcolumn:name="CIDR",type=string,JSONPath=`.spec.cidr`
+// +kubebuilder:printcolumn:name="Pod",type=string,JSONPath=`.spec.podName`
 type Network struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

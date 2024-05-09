@@ -19,11 +19,8 @@ spec:
     - jsonPath: .spec.portGroupName
       name: Port Group
       type: string
-    - jsonPath: .spec.datacenterName
-      name: Datacenter
-      type: string
-    - jsonPath: .spec.cidr
-      name: CIDR
+    - jsonPath: .spec.podName
+      name: Pod
       type: string
     name: v1
     schema:

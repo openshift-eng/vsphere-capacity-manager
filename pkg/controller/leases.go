@@ -66,7 +66,8 @@ func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool) []*v1.Network {
 		lastToken := pathParts[len(pathParts)-1]
 
 		for _, network := range networks {
-			if network.Name == lastToken {
+			if (*network.Spec.PodName == pool.Spec.IBMPoolSpec.Pod) &&
+				(network.Spec.PortGroupName == lastToken) {
 				networksInPool[network.Name] = network
 				break
 			}

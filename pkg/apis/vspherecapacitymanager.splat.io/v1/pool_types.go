@@ -31,9 +31,18 @@ type Pool struct {
 	Status PoolStatus `json:"status"`
 }
 
+type IBMPoolSpec struct {
+	// Pod the pod in the datacenter where the vCenter resides
+	Pod string `json:"pod"`
+	// Pod the pod in the datacenter where the vCenter resides
+	Datacenter string `json:"datacenter"`
+}
+
 // PoolSpec defines the specification for a pool
 type PoolSpec struct {
 	configv1.VSpherePlatformFailureDomainSpec `json:",inline"`
+	// IBMPoolSpec topology information associated with this pool
+	IBMPoolSpec IBMPoolSpec `json:"ibmPoolSpec,omitempty"`
 	// VCpus is the number of virtual CPUs
 	VCpus int `json:"vcpus"`
 	// Memory is the amount of memory in GB
