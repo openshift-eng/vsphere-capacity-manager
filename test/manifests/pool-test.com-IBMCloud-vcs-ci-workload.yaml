@@ -5,6 +5,9 @@ metadata:
   name: test.com-IBMCloud-vcs-ci-workload
 spec:
   exclude: false
+  ibmPoolSpec:
+    datacenter: dal10
+    pod: dal10.pod03
   memory: 2684
   name: test.com-IBMCloud-vcs-ci-workload
   region: us-east

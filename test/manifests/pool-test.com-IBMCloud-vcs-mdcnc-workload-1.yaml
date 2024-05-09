@@ -5,6 +5,9 @@ metadata:
   name: test.com-IBMCloud-vcs-mdcnc-workload-1
 spec:
   exclude: true
+  ibmPoolSpec:
+    datacenter: dal10
+    pod: dal10.pod03
   memory: 383
   name: test.com-IBMCloud-vcs-mdcnc-workload-1
   region: us-east

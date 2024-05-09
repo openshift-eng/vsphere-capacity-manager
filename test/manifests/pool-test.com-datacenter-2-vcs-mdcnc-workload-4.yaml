@@ -5,6 +5,9 @@ metadata:
   name: test.com-datacenter-2-vcs-mdcnc-workload-4
 spec:
   exclude: true
+  ibmPoolSpec:
+    datacenter: dal10
+    pod: dal10.pod03
   memory: 383
   name: test.com-datacenter-2-vcs-mdcnc-workload-4
   region: us-west
@@ -13,8 +16,8 @@ spec:
   topology:
     computeCluster: /datacenter-2/host/vcs-mdcnc-workload-4
     datacenter: /datacenter-2
-    datastore: /datacenter-2/datastore/mdcnc-ds-shared,/datacenter-2/datastore/datastore1
-      (17),/datacenter-2/datastore/workload_share_vcsmdcncworkload3_joYiR,/datacenter-2/datastore/mdcnc-ds-4
+    datastore: /datacenter-2/datastore/mdcnc-ds-4,/datacenter-2/datastore/mdcnc-ds-shared,/datacenter-2/datastore/datastore1
+      (17),/datacenter-2/datastore/workload_share_vcsmdcncworkload3_joYiR
     networks:
     - /datacenter-2/network/ci-vlan-956
     - /datacenter-2/network/ci-vlan-1302
