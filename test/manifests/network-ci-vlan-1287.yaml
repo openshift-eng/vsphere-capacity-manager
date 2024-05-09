@@ -1,0 +1,41 @@
+apiVersion: vsphere-capacity-manager.splat-team.io/v1
+kind: Network
+metadata:
+  creationTimestamp: null
+  name: ci-vlan-1287
+spec:
+  cidr: 25
+  cidrIPv6: 64
+  datacenterName: dal10
+  gateway: 10.38.201.129
+  gatewayipv6: fd65:a1a8:60ad:1287::2
+  ipAddressCount: 128
+  ipAddresses:
+  - 10.38.201.128
+  - 10.38.201.129
+  - 10.38.201.130
+  - 10.38.201.131
+  - 10.38.201.132
+  - 10.38.201.133
+  - 10.38.201.134
+  - 10.38.201.135
+  - 10.38.201.136
+  - 10.38.201.137
+  - 10.38.201.138
+  - 10.38.201.139
+  - 10.38.201.140
+  - 10.38.201.141
+  - 10.38.201.142
+  - 10.38.201.143
+  - 10.38.201.144
+  - 10.38.201.145
+  - 10.38.201.146
+  - 10.38.201.147
+  ipv6prefix: fd65:a1a8:60ad:1287::/64
+  machineNetworkCidr: 10.38.201.128/25
+  netmask: 255.255.255.128
+  portGroupName: ci-vlan-1287
+  startIPv6Address: fd65:a1a8:60ad:1287::4
+  subnetType: SECONDARY_ON_VLAN
+  vlanId: ԇ
+status: {}
