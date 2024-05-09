@@ -21,7 +21,6 @@ const (
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="vCPUs",type=string,JSONPath=`.status.vcpus-available`
 // +kubebuilder:printcolumn:name="Memory(GB)",type=string,JSONPath=`.status.memory-available`
-// +kubebuilder:printcolumn:name="Storage(GB)",type=string,JSONPath=`.status.datastore-available`
 // +kubebuilder:printcolumn:name="Networks",type=string,JSONPath=`.status.network-available`
 type Pool struct {
 	metav1.TypeMeta   `json:",inline"`

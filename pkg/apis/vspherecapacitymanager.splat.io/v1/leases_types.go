@@ -21,8 +21,6 @@ const (
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="vCPUs",type=string,JSONPath=`.spec.vcpus`
 // +kubebuilder:printcolumn:name="Memory(GB)",type=string,JSONPath=`.spec.memory`
-// +kubebuilder:printcolumn:name="Storage(GB)",type=string,JSONPath=`.spec.storage`
-// +kubebuilder:printcolumn:name="Pool",type=string,JSONPath=`.status.pool.name`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 type Lease struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -40,6 +38,7 @@ type LeaseSpec struct {
 	// Memory is the amount of memory in GB allocated for this lease
 	Memory int `json:"memory,omitempty"`
 	// Storage is the amount of storage in GB allocated for this lease
+	// +optional
 	Storage int `json:"storage,omitempty"`
 	// Networks is the number of networks requested
 	Networks int `json:"networks"`

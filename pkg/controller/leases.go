@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/utils"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"log"
 	"strings"
@@ -63,9 +64,7 @@ func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool) []*v1.Network {
 	for _, portGroupPath := range pool.Spec.Topology.Networks {
 		pathParts := strings.Split(portGroupPath, "/")
 		var lastToken string
-		if len(pathParts) == 3 {
-			lastToken = pathParts[2]
-		}
+		lastToken = pathParts[len(pathParts)-1]
 
 		for _, network := range networks {
 			if network.Name == lastToken {
@@ -117,6 +116,7 @@ func (l *LeaseReconciler) reconcilePoolStates() []*v1.Pool {
 		}
 		pool.Status.VCpusAvailable = pool.Spec.VCpus - vcpus
 		pool.Status.MemoryAvailable = pool.Spec.Memory - memory
+		pool.Status.NetworkAvailable = len(pool.Spec.Topology.Networks) - networks
 		pools[poolName] = pool
 		outList = append(outList, pool)
 	}
@@ -211,26 +211,25 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
-	/*if !utils.DoesLeaseHaveNetworks(lease) {
+	if !utils.DoesLeaseHaveNetworks(lease) {
 		poolsMu.Lock()
 		availableNetworks := l.getAvailableNetworks(pool)
 		poolsMu.Unlock()
 
 		if len(availableNetworks) < lease.Spec.Networks {
-			if l.Client.Status().Update(ctx, lease) != nil {
-				log.Printf("unable to update lease: %v", err)
-			}
 			return ctrl.Result{}, fmt.Errorf("lease requires %d networks, %d networks available", lease.Spec.Networks, len(availableNetworks))
 		}
 
-		for _, network := range availableNetworks {
+		for idx := 0; idx < lease.Spec.Networks; idx++ {
+			network := availableNetworks[idx]
 			lease.OwnerReferences = append(lease.OwnerReferences, metav1.OwnerReference{
 				APIVersion: network.APIVersion,
 				Kind:       network.Kind,
 				Name:       network.Name,
+				UID:        network.UID,
 			})
 		}
-	}*/
+	}
 
 	leaseStatus := lease.Status.DeepCopy()
 	err = l.Client.Update(ctx, lease)

@@ -15,7 +15,17 @@ spec:
     singular: network
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.portGroupName
+      name: Port Group
+      type: string
+    - jsonPath: .spec.datacenterName
+      name: Datacenter
+      type: string
+    - jsonPath: .spec.cidr
+      name: CIDR
+      type: string
+    name: v1
     schema:
       openAPIV3Schema:
         description: Network defines a pool of resources defined available for a given
@@ -101,3 +111,4 @@ spec:
         type: object
     served: true
     storage: true
+    subresources: {}

@@ -16,6 +16,9 @@ const (
 // +k8s:openapi-gen=true
 // +kubebuilder:object:root=true
 // +kubebuilder:scope=Namespaced
+// +kubebuilder:printcolumn:name="Port Group",type=string,JSONPath=`.spec.portGroupName`
+// +kubebuilder:printcolumn:name="Datacenter",type=string,JSONPath=`.spec.datacenterName`
+// +kubebuilder:printcolumn:name="CIDR",type=string,JSONPath=`.spec.cidr`
 type Network struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

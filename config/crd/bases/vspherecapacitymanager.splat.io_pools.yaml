@@ -22,9 +22,6 @@ spec:
     - jsonPath: .status.memory-available
       name: Memory(GB)
       type: string
-    - jsonPath: .status.datastore-available
-      name: Storage(GB)
-      type: string
     - jsonPath: .status.network-available
       name: Networks
       type: string

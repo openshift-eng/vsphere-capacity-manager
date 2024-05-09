@@ -76,7 +76,7 @@ var _ = BeforeSuite(func() {
 
 		if strings.HasPrefix(entry.Name(), "network-ci-vlan") {
 			network := v1.Network{}
-			err = yaml.Unmarshal(content, network)
+			err = yaml.Unmarshal(content, &network)
 			Expect(err).NotTo(HaveOccurred())
 			network.Namespace = "default"
 			network.Name = strings.ToLower(network.Name)

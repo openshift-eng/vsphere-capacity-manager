@@ -24,7 +24,7 @@ func DoesLeaseHaveNetworks(lease *v1.Lease) bool {
 			requiredNetworks--
 		}
 	}
-	return requiredNetworks != 0
+	return requiredNetworks == 0
 }
 
 func GenerateEnvVars(lease *v1.Lease) string {
