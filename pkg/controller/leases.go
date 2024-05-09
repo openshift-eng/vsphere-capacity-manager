@@ -63,8 +63,7 @@ func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool) []*v1.Network {
 	availableNetworks := make([]*v1.Network, 0)
 	for _, portGroupPath := range pool.Spec.Topology.Networks {
 		pathParts := strings.Split(portGroupPath, "/")
-		var lastToken string
-		lastToken = pathParts[len(pathParts)-1]
+		lastToken := pathParts[len(pathParts)-1]
 
 		for _, network := range networks {
 			if network.Name == lastToken {
