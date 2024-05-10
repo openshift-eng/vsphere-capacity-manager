@@ -87,6 +87,9 @@ spec:
                 description: PortGroupName is the non-pathed network (port group)
                   name
                 type: string
+              primaryRouterHostname:
+                description: PrimaryRouterHostname hostname of the primary router.
+                type: string
               startIPv6Address:
                 description: StartIPv6Address represents the start IPv6 address for
                   DHCP.

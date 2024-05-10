@@ -36,7 +36,8 @@ spec:
   netmask: 255.255.255.128
   podName: dal10.pod03
   portGroupName: ci-vlan-1240
+  primaryRouterHostname: bcr03a.dal10
   startIPv6Address: fd65:a1a8:60ad:1240::4
   subnetType: SECONDARY_ON_VLAN
-  vlanId: Ә
+  vlanId: "1240"
 status: {}

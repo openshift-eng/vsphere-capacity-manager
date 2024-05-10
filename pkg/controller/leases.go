@@ -211,6 +211,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	var network *v1.Network
 	if !utils.DoesLeaseHaveNetworks(lease) {
 		poolsMu.Lock()
 		availableNetworks := l.getAvailableNetworks(pool)
@@ -221,7 +222,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 
 		for idx := 0; idx < lease.Spec.Networks; idx++ {
-			network := availableNetworks[idx]
+			network = availableNetworks[idx]
 			lease.OwnerReferences = append(lease.OwnerReferences, metav1.OwnerReference{
 				APIVersion: network.APIVersion,
 				Kind:       network.Kind,
@@ -229,6 +230,11 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				UID:        network.UID,
 			})
 		}
+	}
+
+	err = utils.GenerateEnvVars(lease, pool, network)
+	if err != nil {
+		log.Printf("error generating env vars: %v", err)
 	}
 
 	leaseStatus := lease.Status.DeepCopy()

@@ -79,6 +79,10 @@ type NetworkSpec struct {
 	// StartIPv6Address represents the start IPv6 address for DHCP.
 	// +optional
 	StartIPv6Address string `json:"startIPv6Address"`
+
+	// PrimaryRouterHostname hostname of the primary router.
+	// +optional
+	PrimaryRouterHostname string `json:"primaryRouterHostname"`
 }
 
 // NetworkStatus defines the status for a pool
