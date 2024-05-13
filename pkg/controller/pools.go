@@ -87,27 +87,16 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		pool.Status.VCpusAvailable = pool.Spec.VCpus
 		pool.Status.MemoryAvailable = pool.Spec.Memory
 		pool.Status.Initialized = true
-		err := l.Client.Status().Update(ctx, pool)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("error initializing pool status: %w", err)
-		}
-		poolsMu.Lock()
-		pools[poolKey] = pool
-		poolsMu.Unlock()
-	} else {
-		log.Print("pool is initialized, updating status")
-		poolsMu.Lock()
-		cachedPool, inCache := pools[poolKey]
-		if inCache {
-			if (cachedPool.Status.VCpusAvailable == pool.Status.VCpusAvailable) &&
-				(cachedPool.Status.MemoryAvailable == pool.Status.MemoryAvailable) {
-				cachedPool.Status.DeepCopyInto(&pool.Status)
-			} else {
-				cachedPool = nil
-			}
-		}
-		poolsMu.Unlock()
-		if cachedPool != nil {
+	}
+
+	poolsMu.Lock()
+	pools[poolKey] = pool
+	poolsMu.Unlock()
+
+	reconciledPools := reconcilePoolStates()
+	for _, reconciledPool := range reconciledPools {
+		if reconciledPool.Name == req.Name {
+			reconciledPool.Status.DeepCopyInto(&pool.Status)
 			err := l.Client.Status().Update(ctx, pool)
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("error initializing pool status: %w", err)
