@@ -2,12 +2,14 @@ package test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"sigs.k8s.io/yaml"
+	"strings"
 	"testing"
 	"time"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"k8s.io/client-go/kubernetes/scheme"
@@ -28,84 +30,10 @@ var (
 	testScheme *runtime.Scheme
 	ctx        = context.Background()
 	pools      = v1.PoolList{
-		Items: []v1.Pool{
-			{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "vspherecapacitymanager.splat.io/v1",
-					Kind:       "Pool",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "sample-pool-0",
-					Namespace: "default",
-				},
-				Spec: v1.PoolSpec{
-					VCpus:      20,
-					Memory:     200,
-					Storage:    1000,
-					Server:     "vcs8e-vc.ocp2.dev.cluster.com",
-					Datacenter: "dc-0",
-					Cluster:    "cluster-0",
-					Datastore:  "datastore-0",
-					Exclude:    false,
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "sample-pool-1",
-					Namespace: "default",
-				},
-				Spec: v1.PoolSpec{
-					VCpus:      20,
-					Memory:     200,
-					Storage:    2000,
-					Server:     "vcenter.ibmc.devcluster.openshift.com",
-					Datacenter: "dc-1",
-					Cluster:    "cluster-1",
-					Datastore:  "datastore-1",
-					Exclude:    false,
-				},
-			},
-			{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "vspherecapacitymanager.splat.io/v1",
-					Kind:       "Pool",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "sample-zonal-pool-0",
-					Namespace: "default",
-				},
-				Spec: v1.PoolSpec{
-					VCpus:      40,
-					Memory:     400,
-					Storage:    4000,
-					Server:     "vcenter.devqe.ibmc.devcluster.openshift.com",
-					Datacenter: "dc-2",
-					Cluster:    "cluster-2",
-					Datastore:  "datastore-2",
-					Exclude:    true,
-				},
-			},
-			{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "vspherecapacitymanager.splat.io/v1",
-					Kind:       "Pool",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "sample-zonal-pool-1",
-					Namespace: "default",
-				},
-				Spec: v1.PoolSpec{
-					VCpus:      20,
-					Memory:     200,
-					Storage:    2000,
-					Server:     "v8c-2-vcenter.ocp2.dev.cluster.com",
-					Datacenter: "dc-3",
-					Cluster:    "cluster-3",
-					Datastore:  "datastore-3",
-					Exclude:    true,
-				},
-			},
-		},
+		Items: []v1.Pool{},
+	}
+	networks = v1.NetworkList{
+		Items: []v1.Network{},
 	}
 )
 
@@ -136,6 +64,32 @@ var _ = BeforeSuite(func() {
 	k8sClient, err = client.New(cfg, client.Options{Scheme: testScheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
+
+	dirEntries, err := os.ReadDir("./manifests")
+	Expect(err).NotTo(HaveOccurred())
+	for _, entry := range dirEntries {
+		if entry.IsDir() {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join("./manifests", entry.Name()))
+		Expect(err).NotTo(HaveOccurred())
+
+		if strings.HasPrefix(entry.Name(), "network-ci-vlan") {
+			network := v1.Network{}
+			err = yaml.Unmarshal(content, &network)
+			Expect(err).NotTo(HaveOccurred())
+			network.Namespace = "default"
+			network.Name = strings.ToLower(network.Name)
+			networks.Items = append(networks.Items, network)
+		} else if strings.HasPrefix(entry.Name(), "pool-") {
+			pool := v1.Pool{}
+			err = yaml.Unmarshal(content, &pool)
+			Expect(err).NotTo(HaveOccurred())
+			pool.Namespace = "default"
+			pool.Name = strings.ToLower(pool.Name)
+			pools.Items = append(pools.Items, pool)
+		}
+	}
 
 	komega.SetClient(k8sClient)
 	komega.SetContext(ctx)

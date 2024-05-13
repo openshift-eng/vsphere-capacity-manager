@@ -1,6 +1,7 @@
 package v1
 
 import (
+	configv1 "github.com/openshift/api/config/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -8,7 +9,6 @@ const (
 	LeaseKind      = "Lease"
 	APIGroupName   = "vsphere-capacity-manager.splat-team.io"
 	LeaseFinalizer = "vsphere-capacity-manager.splat-team.io/lease-finalizer"
-	PoolFinalizer  = "vsphere-capacity-manager.splat-team.io/pool-finalizer"
 )
 
 // +genclient
@@ -21,8 +21,6 @@ const (
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="vCPUs",type=string,JSONPath=`.spec.vcpus`
 // +kubebuilder:printcolumn:name="Memory(GB)",type=string,JSONPath=`.spec.memory`
-// +kubebuilder:printcolumn:name="Storage(GB)",type=string,JSONPath=`.spec.storage`
-// +kubebuilder:printcolumn:name="Pool",type=string,JSONPath=`.status.pool.name`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 type Lease struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -40,6 +38,7 @@ type LeaseSpec struct {
 	// Memory is the amount of memory in GB allocated for this lease
 	Memory int `json:"memory,omitempty"`
 	// Storage is the amount of storage in GB allocated for this lease
+	// +optional
 	Storage int `json:"storage,omitempty"`
 	// Networks is the number of networks requested
 	Networks int `json:"networks"`
@@ -47,13 +46,18 @@ type LeaseSpec struct {
 	// pool
 	// +optional
 	RequiredPool string `json:"required-pool,omitempty"`
+	// BoskosLeaseID is the ID of the lease in Boskos associated with this lease
+	// +optional
+	BoskosLeaseID string `json:"boskos-lease-id,omitempty"`
 }
 
 // LeaseStatus defines the status for a lease
 type LeaseStatus struct {
-	// BoskosLeaseID is the ID of the lease in Boskos associated with this lease
-	// +optional
-	BoskosLeaseID string `json:"boskos-lease-id,omitempty"`
+	configv1.VSpherePlatformFailureDomainSpec `json:",inline"`
+
+	// EnvVars a freeform string which contains bash which is to be sourced
+	// by the holder of the lease.
+	EnvVars string `json:"envVars,omitempty"`
 
 	// Phase is the current phase of the lease
 	// +optional

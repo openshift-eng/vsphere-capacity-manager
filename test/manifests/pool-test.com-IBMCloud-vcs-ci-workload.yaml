@@ -1,0 +1,59 @@
+apiVersion: vsphere-capacity-manager.splat-team.io/v1
+kind: Pool
+metadata:
+  creationTimestamp: null
+  name: test.com-IBMCloud-vcs-ci-workload
+spec:
+  exclude: false
+  ibmPoolSpec:
+    datacenter: dal10
+    pod: dal10.pod03
+  memory: 2684
+  name: test.com-IBMCloud-vcs-ci-workload
+  region: us-east
+  server: test.com
+  storage: 0
+  topology:
+    computeCluster: /IBMCloud/host/vcs-ci-workload
+    datacenter: /IBMCloud
+    datastore: /IBMCloud/datastore/vsanDatastore
+    networks:
+    - /IBMCloud/network/ci-vlan-1302
+    - /IBMCloud/network/ci-vlan-1300
+    - /IBMCloud/network/ci-vlan-1298
+    - /IBMCloud/network/ci-vlan-1296
+    - /IBMCloud/network/ci-vlan-1289
+    - /IBMCloud/network/ci-vlan-1287
+    - /IBMCloud/network/ci-vlan-1284
+    - /IBMCloud/network/ci-vlan-1279
+    - /IBMCloud/network/ci-vlan-1274
+    - /IBMCloud/network/ci-vlan-1272
+    - /IBMCloud/network/ci-vlan-1271
+    - /IBMCloud/network/ci-vlan-1260
+    - /IBMCloud/network/ci-vlan-1255
+    - /IBMCloud/network/ci-vlan-1254
+    - /IBMCloud/network/ci-vlan-1249
+    - /IBMCloud/network/ci-vlan-1246
+    - /IBMCloud/network/ci-vlan-1243
+    - /IBMCloud/network/ci-vlan-1240
+    - /IBMCloud/network/ci-vlan-1238
+    - /IBMCloud/network/ci-vlan-1237
+    - /IBMCloud/network/ci-vlan-1235
+    - /IBMCloud/network/ci-vlan-1234
+    - /IBMCloud/network/ci-vlan-1233
+    - /IBMCloud/network/ci-vlan-1232
+    - /IBMCloud/network/ci-vlan-1229
+    - /IBMCloud/network/ci-vlan-1227
+    - /IBMCloud/network/ci-vlan-1225
+    - /IBMCloud/network/ci-vlan-1207
+    - /IBMCloud/network/ci-vlan-1197
+    - /IBMCloud/network/ci-vlan-1148
+    - /IBMCloud/network/ci-vlan-956
+  vcpus: 240
+  zone: us-east-4a
+status:
+  datastore-available: 0
+  initialized: false
+  memory-available: 0
+  network-available: 0
+  vcpus-available: 0

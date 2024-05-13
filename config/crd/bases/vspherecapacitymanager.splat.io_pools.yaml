@@ -22,9 +22,6 @@ spec:
     - jsonPath: .status.memory-available
       name: Memory(GB)
       type: string
-    - jsonPath: .status.datastore-available
-      name: Storage(GB)
-      type: string
     - jsonPath: .status.network-available
       name: Networks
       type: string
@@ -49,41 +46,141 @@ spec:
           spec:
             description: PoolSpec defines the specification for a pool
             properties:
-              cluster:
-                description: Cluster cluster associated with this pool
-                type: string
-              datacenter:
-                description: Datacenter associated with this pool
-                type: string
-              datastore:
-                description: Datastore datastore associated with this pool
-                type: string
               exclude:
                 description: Exclude when true, this pool is excluded from the default
                   pools. This is useful if a job must be scheduled to a specific pool
                   and that pool only has limited capacity.
                 type: boolean
+              ibmPoolSpec:
+                description: IBMPoolSpec topology information associated with this
+                  pool
+                properties:
+                  datacenter:
+                    description: Pod the pod in the datacenter where the vCenter resides
+                    type: string
+                  pod:
+                    description: Pod the pod in the datacenter where the vCenter resides
+                    type: string
+                required:
+                - datacenter
+                - pod
+                type: object
               memory:
                 description: Memory is the amount of memory in GB
                 type: integer
+              name:
+                description: name defines the arbitrary but unique name of a failure
+                  domain.
+                maxLength: 256
+                minLength: 1
+                type: string
+              region:
+                description: region defines the name of a region tag that will be
+                  attached to a vCenter datacenter. The tag category in vCenter must
+                  be named openshift-region.
+                maxLength: 80
+                minLength: 1
+                type: string
               server:
-                description: Server the server that provisions resources for the pool
+                description: server is the fully-qualified domain name or the IP address
+                  of the vCenter server. ---
+                maxLength: 255
+                minLength: 1
                 type: string
               storage:
                 description: Storage is the amount of storage in GB
                 type: integer
+              topology:
+                description: Topology describes a given failure domain using vSphere
+                  constructs
+                properties:
+                  computeCluster:
+                    description: computeCluster the absolute path of the vCenter cluster
+                      in which virtual machine will be located. The absolute path
+                      is of the form /<datacenter>/host/<cluster>. The maximum length
+                      of the path is 2048 characters.
+                    maxLength: 2048
+                    pattern: ^/.*?/host/.*?
+                    type: string
+                  datacenter:
+                    description: datacenter is the name of vCenter datacenter in which
+                      virtual machines will be located. The maximum length of the
+                      datacenter name is 80 characters.
+                    maxLength: 80
+                    type: string
+                  datastore:
+                    description: datastore is the absolute path of the datastore in
+                      which the virtual machine is located. The absolute path is of
+                      the form /<datacenter>/datastore/<datastore> The maximum length
+                      of the path is 2048 characters.
+                    maxLength: 2048
+                    pattern: ^/.*?/datastore/.*?
+                    type: string
+                  folder:
+                    description: folder is the absolute path of the folder where virtual
+                      machines are located. The absolute path is of the form /<datacenter>/vm/<folder>.
+                      The maximum length of the path is 2048 characters.
+                    maxLength: 2048
+                    pattern: ^/.*?/vm/.*?
+                    type: string
+                  networks:
+                    description: networks is the list of port group network names
+                      within this failure domain. Currently, we only support a single
+                      interface per RHCOS virtual machine. The available networks
+                      (port groups) can be listed using `govc ls 'network/*'` The
+                      single interface should be the absolute path of the form /<datacenter>/network/<portgroup>.
+                    items:
+                      type: string
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  resourcePool:
+                    description: resourcePool is the absolute path of the resource
+                      pool where virtual machines will be created. The absolute path
+                      is of the form /<datacenter>/host/<cluster>/Resources/<resourcepool>.
+                      The maximum length of the path is 2048 characters.
+                    maxLength: 2048
+                    pattern: ^/.*?/host/.*?/Resources.*
+                    type: string
+                  template:
+                    description: "template is the full inventory path of the virtual
+                      machine or template that will be cloned when creating new machines
+                      in this failure domain. The maximum length of the path is 2048
+                      characters. \n When omitted, the template will be calculated
+                      by the control plane machineset operator based on the region
+                      and zone defined in VSpherePlatformFailureDomainSpec. For example,
+                      for zone=zonea, region=region1, and infrastructure name=test,
+                      the template path would be calculated as /<datacenter>/vm/test-rhcos-region1-zonea."
+                    maxLength: 2048
+                    minLength: 1
+                    pattern: ^/.*?/vm/.*?
+                    type: string
+                required:
+                - computeCluster
+                - datacenter
+                - datastore
+                - networks
+                type: object
               vcpus:
                 description: VCpus is the number of virtual CPUs
                 type: integer
+              zone:
+                description: zone defines the name of a zone tag that will be attached
+                  to a vCenter cluster. The tag category in vCenter must be named
+                  openshift-zone.
+                maxLength: 80
+                minLength: 1
+                type: string
             required:
-            - cluster
-            - datacenter
-            - datastore
             - exclude
             - memory
+            - name
+            - region
             - server
             - storage
+            - topology
             - vcpus
+            - zone
             type: object
           status:
             description: PoolStatus defines the status for a pool

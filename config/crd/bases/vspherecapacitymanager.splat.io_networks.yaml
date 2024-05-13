@@ -5,20 +5,27 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.11.1
   creationTimestamp: null
-  name: subnets.vspherecapacitymanager.splat.io
+  name: networks.vspherecapacitymanager.splat.io
 spec:
   group: vspherecapacitymanager.splat.io
   names:
-    kind: Subnet
-    listKind: SubnetList
-    plural: subnets
-    singular: subnet
+    kind: Network
+    listKind: NetworkList
+    plural: networks
+    singular: network
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.portGroupName
+      name: Port Group
+      type: string
+    - jsonPath: .spec.podName
+      name: Pod
+      type: string
+    name: v1
     schema:
       openAPIV3Schema:
-        description: Subnet defines a pool of resources defined available for a given
+        description: Network defines a pool of resources defined available for a given
           vCenter, cluster, and datacenter
         properties:
           apiVersion:
@@ -34,7 +41,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: SubnetSpec defines the specification for a pool
+            description: NetworkSpec defines the specification for a pool
             properties:
               cidr:
                 description: "The Classless Inter-Domain Routing prefix of this subnet,
@@ -76,13 +83,12 @@ spec:
               podName:
                 description: The PodName is the pod that this VLAN is associated with.
                 type: string
-              portGroupFullPath:
-                description: PortGroupFullPath is the govmomi-based full path of the
-                  network (port group) object
-                type: string
               portGroupName:
                 description: PortGroupName is the non-pathed network (port group)
                   name
+                type: string
+              primaryRouterHostname:
+                description: PrimaryRouterHostname hostname of the primary router.
                 type: string
               startIPv6Address:
                 description: StartIPv6Address represents the start IPv6 address for
@@ -94,15 +100,15 @@ spec:
                 type: string
             required:
             - datacenterName
-            - portGroupFullPath
             - portGroupName
             - vlanId
             type: object
           status:
-            description: SubnetStatus defines the status for a pool
+            description: NetworkStatus defines the status for a pool
             type: object
         required:
         - spec
         type: object
     served: true
     storage: true
+    subresources: {}

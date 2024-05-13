@@ -53,23 +53,24 @@ func (r *lease) Build() *v1.Lease {
 	return &r.lease
 }
 
-// DoesLeaseHavePool checks if the lease is reflected in the pool
-func DoesLeaseHavePool(lease *v1.Lease) (bool, error) {
+// IsLeaseOwnedByKinds IsLeaseOwnedByKind checks if the lease is owned by the declared kinds
+func IsLeaseOwnedByKinds(lease *v1.Lease, kinds ...string) (bool, error) {
 	if lease.Status.Phase != v1.PHASE_FULFILLED {
 		return false, fmt.Errorf("lease %s has not been fulfilled", lease.Name)
 	}
 
-	var ref *metav1.OwnerReference
-	for _, ownerRef := range lease.OwnerReferences {
-		if ownerRef.Kind == "Pool" {
-			ref = &ownerRef
+	for _, kind := range kinds {
+		hasKind := false
+		for _, ownerRef := range lease.OwnerReferences {
+			if ownerRef.Kind == kind {
+				hasKind = true
+				break
+			}
+		}
+		if !hasKind {
+			return false, fmt.Errorf("failed to find %s owner reference for lease %s", kind, lease.Name)
 		}
 	}
 
-	if ref == nil {
-		return false, fmt.Errorf("failed to find pool owner reference for lease %s", lease.Name)
-	}
-
 	return true, nil
-
 }

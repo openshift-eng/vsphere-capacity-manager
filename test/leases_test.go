@@ -53,6 +53,14 @@ var _ = Describe("Lease management", func() {
 		}
 		Expect(leaseReconciler.SetupWithManager(mgr)).To(Succeed(), "Reconciler should be able to setup with manager")
 
+		networkReconciler := &controller.NetworkReconciler{
+			Client:         mgr.GetClient(),
+			UncachedClient: mgr.GetClient(),
+			Namespace:      namespaceName,
+			OperatorName:   controllerName,
+		}
+		Expect(networkReconciler.SetupWithManager(mgr)).To(Succeed(), "Reconciler should be able to setup with manager")
+
 		poolReconciler := &controller.PoolReconciler{
 			Client:         mgr.GetClient(),
 			UncachedClient: mgr.GetClient(),
@@ -101,6 +109,19 @@ var _ = Describe("Lease management", func() {
 			}
 			return nil
 		}).Should(Succeed())
+
+		By("Creating test networks")
+		for _, network := range networks.Items {
+			Expect(k8sClient.Create(ctx, &network)).To(Succeed())
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, types.NamespacedName{
+					Namespace: network.Namespace,
+					Name:      network.Name,
+				}, &network) == nil
+
+			}).Should(BeTrue())
+		}
+
 	}, OncePerOrdered)
 
 	AfterEach(func() {
@@ -123,6 +144,14 @@ var _ = Describe("Lease management", func() {
 			Expect(k8sClient.Update(ctx, &lease)).To(Succeed())
 		}
 
+		networks := &v1.NetworkList{}
+		Expect(k8sClient.List(ctx, networks, client.InNamespace(namespaceName))).To(Succeed())
+		for _, network := range networks.Items {
+			network.ObjectMeta.Finalizers = []string{}
+			Expect(k8sClient.Update(ctx, &network)).To(Succeed())
+		}
+
+		Expect(k8sClient.DeleteAllOf(ctx, &v1.Network{}, client.InNamespace(namespaceName))).To(Succeed())
 		Expect(k8sClient.DeleteAllOf(ctx, &v1.Lease{}, client.InNamespace(namespaceName))).To(Succeed())
 		Expect(k8sClient.DeleteAllOf(ctx, &v1.Pool{}, client.InNamespace(namespaceName))).To(Succeed())
 
@@ -145,12 +174,11 @@ var _ = Describe("Lease management", func() {
 
 		leases := &v1.LeaseList{}
 		By("checking the lease", func() {
-			By("associated pool should reflect the resources claimed by the lease", func() {
+			By("lease should be owned by a pool and network", func() {
 				Eventually(func() bool {
 					Expect(k8sClient.List(ctx, leases, client.InNamespace(namespaceName))).To(Succeed())
 					Expect(leases.Items).To(HaveLen(1))
-
-					result, _ := DoesLeaseHavePool(&leases.Items[0])
+					result, _ := IsLeaseOwnedByKinds(&leases.Items[0], "Network", "Pool")
 					return result
 				}).Should(BeTrue())
 			})
@@ -185,7 +213,7 @@ var _ = Describe("Lease management", func() {
 
 		leases := &v1.LeaseList{}
 		By("checking the lease", func() {
-			By("associated pool should reflect the resources claimed by the lease", func() {
+			By("lease should be owned by a pool and network", func() {
 				Eventually(func() bool {
 					Expect(k8sClient.List(ctx, leases, client.InNamespace(namespaceName))).To(Succeed())
 					if len(leases.Items) != 2 {
@@ -193,7 +221,7 @@ var _ = Describe("Lease management", func() {
 					}
 
 					for _, lease := range leases.Items {
-						result, _ := DoesLeaseHavePool(&lease)
+						result, _ := IsLeaseOwnedByKinds(&lease, "Network", "Pool")
 						if result == false {
 							return false
 						}
@@ -206,8 +234,8 @@ var _ = Describe("Lease management", func() {
 	It("should fail if no pool is available", func() {
 		var leases []*v1.Lease
 		By("creating leases", func() {
-			for i := 0; i < 3; i++ {
-				lease := GetLease().WithShape(SHAPE_SMALL).Build()
+			for i := 0; i < 4; i++ {
+				lease := GetLease().WithShape(SHAPE_MEDIUM).Build()
 				Expect(lease).NotTo(BeNil())
 				Expect(k8sClient.Create(ctx, lease)).To(Succeed())
 				leases = append(leases, lease)
@@ -226,19 +254,18 @@ var _ = Describe("Lease management", func() {
 							log.Printf("unable to get lease: %v", err)
 							return false
 						}
-						if len(lease.Status.Phase) == 0 {
-							return false
-						}
 						switch lease.Status.Phase {
 						case v1.PHASE_FULFILLED:
 							fulfilled++
 						case v1.PHASE_PENDING:
+							fallthrough
+						default:
 							pending++
 						}
 					}
 					log.Printf("pending leases: %v", pending)
 					log.Printf("fulfilled leases: %v", fulfilled)
-					return pending == 1 && fulfilled == 2
+					return pending == 3 && fulfilled == 1
 				}).Should(BeTrue())
 			})
 		})
@@ -260,9 +287,9 @@ var _ = Describe("Lease management", func() {
 		})
 
 		By("checking the lease", func() {
-			By("associated pool should reflect the resources claimed by the lease", func() {
+			By("lease should be owned by a pool and network", func() {
 				Eventually(func() bool {
-					result, _ := DoesLeaseHavePool(lease)
+					result, _ := IsLeaseOwnedByKinds(lease, "Pool", "Network")
 					return result
 				}).Should(BeTrue())
 			})
@@ -350,7 +377,7 @@ var _ = Describe("Lease management", func() {
 	It("should acquire a lease in a non-default pool, then delete the lease", func() {
 		var lease *v1.Lease
 		By("creating a resource lease", func() {
-			lease = GetLease().WithShape(SHAPE_SMALL).WithPool("sample-zonal-pool-0").Build()
+			lease = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-3").Build()
 			Expect(lease).NotTo(BeNil())
 			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
 		})
@@ -363,9 +390,9 @@ var _ = Describe("Lease management", func() {
 		})
 
 		By("checking the leases", func() {
-			By("associated pool should reflect the resources claimed by the leases", func() {
+			By("lease should be owned by a pool and network", func() {
 				Eventually(func() bool {
-					result, _ := DoesLeaseHavePool(lease)
+					result, _ := IsLeaseOwnedByKinds(lease, "Pool", "Network")
 					return result
 				}).Should(BeTrue())
 			})

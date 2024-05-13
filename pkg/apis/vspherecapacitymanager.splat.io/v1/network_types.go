@@ -4,29 +4,33 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	NETWORKS_LAST_LEASE_UPDATE_ANNOTATION = "vspherecapacitymanager.splat.io/last-network-update"
+	NetworkFinalizer                      = "vsphere-capacity-manager.splat-team.io/network-finalizer"
+)
+
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// Subnet defines a pool of resources defined available for a given vCenter, cluster, and datacenter
+// Network defines a pool of resources defined available for a given vCenter, cluster, and datacenter
 // +k8s:openapi-gen=true
 // +kubebuilder:object:root=true
 // +kubebuilder:scope=Namespaced
-type Subnet struct {
+// +kubebuilder:printcolumn:name="Port Group",type=string,JSONPath=`.spec.portGroupName`
+// +kubebuilder:printcolumn:name="Pod",type=string,JSONPath=`.spec.podName`
+type Network struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec SubnetSpec `json:"spec"`
+	Spec NetworkSpec `json:"spec"`
 	// +optional
-	Status SubnetStatus `json:"status"`
+	Status NetworkStatus `json:"status"`
 }
 
-// SubnetSpec defines the specification for a pool
-type SubnetSpec struct {
+// NetworkSpec defines the specification for a pool
+type NetworkSpec struct {
 	// PortGroupName is the non-pathed network (port group) name
 	PortGroupName string `json:"portGroupName"`
-
-	// PortGroupFullPath is the govmomi-based full path of the network (port group) object
-	PortGroupFullPath string `json:"portGroupFullPath"`
 
 	VlanId string `json:"vlanId"`
 
@@ -75,20 +79,24 @@ type SubnetSpec struct {
 	// StartIPv6Address represents the start IPv6 address for DHCP.
 	// +optional
 	StartIPv6Address string `json:"startIPv6Address"`
+
+	// PrimaryRouterHostname hostname of the primary router.
+	// +optional
+	PrimaryRouterHostname string `json:"primaryRouterHostname"`
 }
 
-// SubnetStatus defines the status for a pool
-type SubnetStatus struct {
+// NetworkStatus defines the status for a pool
+type NetworkStatus struct {
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// SubnetList is a list of pools
-type SubnetList struct {
+// NetworkList is a list of pools
+type NetworkList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
 
-	Items []Subnet `json:"items"`
+	Items []Network `json:"items"`
 }
 
-type Subnets []*Subnet
+type Networks []*Network

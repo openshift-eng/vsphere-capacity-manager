@@ -1,0 +1,43 @@
+apiVersion: vsphere-capacity-manager.splat-team.io/v1
+kind: Network
+metadata:
+  creationTimestamp: null
+  name: ci-vlan-956-dal10-dal10.pod03
+spec:
+  cidr: 25
+  cidrIPv6: 64
+  datacenterName: dal10
+  gateway: 10.93.134.1
+  gatewayipv6: fd65:a1a8:60ad:956::2
+  ipAddressCount: 128
+  ipAddresses:
+  - 10.93.134.0
+  - 10.93.134.1
+  - 10.93.134.2
+  - 10.93.134.3
+  - 10.93.134.4
+  - 10.93.134.5
+  - 10.93.134.6
+  - 10.93.134.7
+  - 10.93.134.8
+  - 10.93.134.9
+  - 10.93.134.10
+  - 10.93.134.11
+  - 10.93.134.12
+  - 10.93.134.13
+  - 10.93.134.14
+  - 10.93.134.15
+  - 10.93.134.16
+  - 10.93.134.17
+  - 10.93.134.18
+  - 10.93.134.19
+  ipv6prefix: fd65:a1a8:60ad:956::/64
+  machineNetworkCidr: 10.93.134.0/25
+  netmask: 255.255.255.128
+  podName: dal10.pod03
+  portGroupName: ci-vlan-956
+  primaryRouterHostname: bcr03a.dal10
+  startIPv6Address: fd65:a1a8:60ad:956::4
+  subnetType: SECONDARY_ON_VLAN
+  vlanId: "956"
+status: {}
