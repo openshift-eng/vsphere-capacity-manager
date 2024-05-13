@@ -97,7 +97,10 @@ func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool) []*v1.Network {
 
 // reconcilePoolStates updates the states of all pools. this ensures we have the most up-to-date state of the pools
 // before we attempt to reconcile any leases. the pool resource statuses are not updated.
-func (l *LeaseReconciler) reconcilePoolStates() []*v1.Pool {
+func reconcilePoolStates() []*v1.Pool {
+	if poolsMu.TryLock() {
+		defer poolsMu.Unlock()
+	}
 	var outList []*v1.Pool
 
 	for poolName, pool := range pools {
@@ -142,6 +145,7 @@ func (l *LeaseReconciler) bumpPool(ctx context.Context, lease *v1.Lease) error {
 	if pool.Annotations == nil {
 		pool.Annotations = make(map[string]string)
 	}
+
 	pool.Annotations["last-updated"] = time.Now().Format(time.RFC3339)
 	err := l.Client.Update(ctx, pool)
 	if err != nil {
@@ -171,7 +175,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		poolsMu.Lock()
 		delete(leases, leaseKey)
-		l.reconcilePoolStates()
+		reconcilePoolStates()
 		poolsMu.Unlock()
 		return ctrl.Result{}, nil
 	}
@@ -185,9 +189,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
-	poolsMu.Lock()
-	updatedPools := l.reconcilePoolStates()
-	poolsMu.Unlock()
+	updatedPools := reconcilePoolStates()
 
 	lease.Status.Phase = v1.PHASE_PENDING
 
