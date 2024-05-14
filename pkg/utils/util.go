@@ -16,6 +16,10 @@ var (
 func init() {
 	var err error
 	sourceTemplate := `export vsphere_url="{{.Server}}"
+		export GOVC_URL="{{.Server}}
+		export GOVC_DATACENTER="{{.VDatacenter}}
+		export GOVC_DATASTORE="{{.Datastore}}
+		export GOVC_NETWORK="{{.PortGroup}}
 		export vsphere_cluster="{{.ComputeCluster}}"
 		export vsphere_resource_pool="{{.ResourcePool}}"
 		export vsphere_datacenter="{{.VDatacenter}}"
