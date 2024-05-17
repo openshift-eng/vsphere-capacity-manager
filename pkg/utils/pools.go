@@ -14,6 +14,9 @@ import (
 func GetFittingPools(lease *v1.Lease, pools []*v1.Pool) []*v1.Pool {
 	var fittingPools []*v1.Pool
 	for _, pool := range pools {
+		if pool.Spec.NoSchedule {
+			continue
+		}
 		nameMatch := len(lease.Spec.RequiredPool) > 0 && lease.Spec.RequiredPool == pool.ObjectMeta.Name
 		if !nameMatch && pool.Spec.Exclude {
 			continue

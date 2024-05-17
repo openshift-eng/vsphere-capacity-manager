@@ -25,6 +25,12 @@ spec:
     - jsonPath: .status.network-available
       name: Networks
       type: string
+    - jsonPath: .spec.noSchedule
+      name: Disabled
+      type: string
+    - jsonPath: .spec.exclude
+      name: Excluded
+      type: string
     name: v1
     schema:
       openAPIV3Schema:
@@ -74,6 +80,11 @@ spec:
                 maxLength: 256
                 minLength: 1
                 type: string
+              noSchedule:
+                description: NoSchedule when true, new leases for this pool will not
+                  be allocated. any in progress leases will remain active until they
+                  are destroyed.
+                type: boolean
               region:
                 description: region defines the name of a region tag that will be
                   attached to a vCenter datacenter. The tag category in vCenter must
