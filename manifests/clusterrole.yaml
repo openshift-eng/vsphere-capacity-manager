@@ -1,0 +1,16 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vsphere-capacity-manager
+rules:
+  - apiGroups:
+      - vspherecapacitymanager.splat.io
+    resources:
+      - leases
+      - leases/status
+      - pools
+      - pools/status
+      - networks
+      - networks/status
+    verbs:
+      - '*'
