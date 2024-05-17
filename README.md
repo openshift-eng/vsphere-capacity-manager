@@ -41,7 +41,7 @@ spec:
   networks: 1
 ```
 
-When a `Lease` is fulfilled, `status.phase` will be set to `Fulfilled`.  
+When a `Lease` is fulfilled, `status.phase` will be set to `Fulfilled`.  Additionally, when fulfilled, the `Lease` `
 
 ## Defining a Pool
 
@@ -104,6 +104,58 @@ spec:
   vcpus: 240
 ```
 
+## Defining a Network
+
+A `Network` defines a VLAN, subnet, and location in a datacenter.
+
+```yaml
+apiVersion: vspherecapacitymanager.splat.io/v1
+kind: Network
+metadata:
+  name: ci-vlan-1296-dal10-dal10.pod03
+  namespace: vsphere-infra-helpers
+spec:
+  cidr: 25
+  cidrIPv6: 64
+  datacenterName: dal10
+  gateway: 10.94.169.1
+  gatewayipv6: fd65:a1a8:60ad:1296::2
+  ipAddressCount: 128
+  ipAddresses:
+  - 10.94.169.0
+  - 10.94.169.1
+  - 10.94.169.2
+  - 10.94.169.3
+  - 10.94.169.4
+  - 10.94.169.5
+  - 10.94.169.6
+  - 10.94.169.7
+  - 10.94.169.8
+  - 10.94.169.9
+  - 10.94.169.10
+  - 10.94.169.11
+  - 10.94.169.12
+  - 10.94.169.13
+  - 10.94.169.14
+  - 10.94.169.15
+  - 10.94.169.16
+  - 10.94.169.17
+  - 10.94.169.18
+  - 10.94.169.19
+  ipv6prefix: fd65:a1a8:60ad:1296::/64
+  machineNetworkCidr: 10.94.169.0/25
+  netmask: 255.255.255.128
+  podName: dal10.pod03
+  portGroupName: ci-vlan-1296
+  primaryRouterHostname: bcr03a.dal10
+  startIPv6Address: fd65:a1a8:60ad:1296::4
+  subnetType: SECONDARY_ON_VLAN
+  vlanId: "1296"
+status: {}
+```
+
+Networks are associated with `Pools` by the datacenter and pod in which they reside.
+
 ## Allocation Strategy
 
 ### Pool Configuration
@@ -127,6 +179,13 @@ To request a specific pool, a Lease must set `spec.requiredPool` to the name of 
 
 TO-DO: implement a poolSelector paradigm
 
-## RBAC Requirements
+## Networks
 
-## Operator Deployment
+Networks correlate with vSphere port groups.  OpenShift cluster typically must have all nodes on a common subnet, particularly for IPI.  
+To accommodate this, the scheduler will attempt to determine if a related lease already has a network lease.  A lease is determined to be related if:
+
+1. The lease has a label `boskos-lease-id`
+2. Another lease has the same value for the `boskos-lease-id` label
+3. The lease resides in the same vCenter
+
+When leases cross vCenters, those leases will have different network leases.
