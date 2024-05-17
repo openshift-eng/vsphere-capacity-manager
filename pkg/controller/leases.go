@@ -18,6 +18,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	boskosIdLabel = "boskos-lease-id"
+)
+
 type LeaseReconciler struct {
 	client.Client
 	Scheme         *runtime.Scheme
@@ -154,6 +158,38 @@ func (l *LeaseReconciler) bumpPool(ctx context.Context, lease *v1.Lease) error {
 	return nil
 }
 
+// returns a common portgroup that satisfies all known leases for this job. common port groups are scoped
+// to a single vCenter. for multiple vCenters, a network lease for each vCenter will be claimed.
+func (l *LeaseReconciler) getCommonNetworkForLease(lease *v1.Lease) (*v1.Network, error) {
+	var exists bool
+	var leaseID string
+
+	if leaseID, exists = lease.Labels[boskosIdLabel]; !exists {
+		return nil, fmt.Errorf("no lease label found for %s", lease.Name)
+	}
+
+	for _, _lease := range leases {
+		if thisLeaseID, exists := _lease.Labels[boskosIdLabel]; !exists {
+			continue
+		} else if thisLeaseID != leaseID {
+			continue
+		} else if lease.Status.Server != _lease.Status.Server {
+			continue
+		}
+		for _, ownerRef := range _lease.OwnerReferences {
+			if ownerRef.Kind != "Network" {
+				continue
+			}
+			for _, network := range networks {
+				if network.Name == ownerRef.Name && network.UID == ownerRef.UID {
+					return network, nil
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("no common network found for %s", lease.Name)
+}
+
 func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var err error
 	log.Print("Reconciling lease")
@@ -214,15 +250,25 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	var network *v1.Network
+
 	if !utils.DoesLeaseHaveNetworks(lease) {
 		poolsMu.Lock()
-		availableNetworks := l.getAvailableNetworks(pool)
+		var availableNetworks []*v1.Network
+		network, err = l.getCommonNetworkForLease(lease)
+		if err != nil {
+			log.Printf("error getting common network for lease, will attempt to allocate a new one: %v", err)
+			availableNetworks = l.getAvailableNetworks(pool)
+		} else {
+			availableNetworks = []*v1.Network{network}
+		}
+
 		poolsMu.Unlock()
 
 		if len(availableNetworks) < lease.Spec.Networks {
 			return ctrl.Result{}, fmt.Errorf("lease requires %d networks, %d networks available", lease.Spec.Networks, len(availableNetworks))
 		}
 
+		var networks []string
 		for idx := 0; idx < lease.Spec.Networks; idx++ {
 			network = availableNetworks[idx]
 			lease.OwnerReferences = append(lease.OwnerReferences, metav1.OwnerReference{
@@ -231,7 +277,10 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				Name:       network.Name,
 				UID:        network.UID,
 			})
+			networks = append(networks, fmt.Sprintf("/%s/network/%s", lease.Status.Topology.Datacenter, network.Spec.PortGroupName))
 		}
+
+		lease.Status.Topology.Networks = networks
 	}
 
 	err = utils.GenerateEnvVars(lease, pool, network)

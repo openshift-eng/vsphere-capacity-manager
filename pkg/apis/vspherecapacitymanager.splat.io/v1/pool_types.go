@@ -22,6 +22,8 @@ const (
 // +kubebuilder:printcolumn:name="vCPUs",type=string,JSONPath=`.status.vcpus-available`
 // +kubebuilder:printcolumn:name="Memory(GB)",type=string,JSONPath=`.status.memory-available`
 // +kubebuilder:printcolumn:name="Networks",type=string,JSONPath=`.status.network-available`
+// +kubebuilder:printcolumn:name="Disabled",type=string,JSONPath=`.spec.noSchedule`
+// +kubebuilder:printcolumn:name="Excluded",type=string,JSONPath=`.spec.exclude`
 type Pool struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -53,6 +55,10 @@ type PoolSpec struct {
 	// This is useful if a job must be scheduled to a specific pool and that
 	// pool only has limited capacity.
 	Exclude bool `json:"exclude"`
+	// NoSchedule when true, new leases for this pool will not be allocated.
+	// any in progress leases will remain active until they are destroyed.
+	// +optional
+	NoSchedule bool `json:"noSchedule"`
 }
 
 // PoolStatus defines the status for a pool
