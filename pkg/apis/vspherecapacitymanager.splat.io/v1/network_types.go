@@ -7,6 +7,7 @@ import (
 const (
 	NETWORKS_LAST_LEASE_UPDATE_ANNOTATION = "vspherecapacitymanager.splat.io/last-network-update"
 	NetworkFinalizer                      = "vsphere-capacity-manager.splat-team.io/network-finalizer"
+	NetworkKind                           = "Network"
 )
 
 // +genclient

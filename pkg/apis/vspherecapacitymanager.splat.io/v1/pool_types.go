@@ -9,6 +9,7 @@ import (
 const (
 	POOLS_LAST_LEASE_UPDATE_ANNOTATION = "vspherecapacitymanager.splat.io/last-pool-update"
 	PoolFinalizer                      = "vsphere-capacity-manager.splat-team.io/pool-finalizer"
+	PoolKind                           = "Pool"
 )
 
 // +genclient

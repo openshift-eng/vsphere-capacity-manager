@@ -3,19 +3,23 @@ package controller
 import (
 	"context"
 	"fmt"
-	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/utils"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"log"
 	"strings"
 	"time"
 
-	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
+	"github.com/prometheus/client_golang/prometheus"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/utils"
+
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 )
 
 const (
@@ -202,6 +206,9 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	promLabels := make(prometheus.Labels)
+	promLabels["namespace"] = req.Namespace
+
 	if lease.DeletionTimestamp != nil {
 		log.Print("Lease is being deleted")
 		lease.Finalizers = []string{}
@@ -209,8 +216,14 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("error dropping finalizers from lease: %w", err)
 		}
+
+		if ownRef := utils.DoesLeaseHavePool(lease); ownRef != nil {
+			promLabels["pool"] = ownRef.Name
+		}
+
 		poolsMu.Lock()
 		delete(leases, leaseKey)
+		LeasesInUse.With(promLabels).Dec()
 		reconcilePoolStates()
 		poolsMu.Unlock()
 		return ctrl.Result{}, nil
@@ -300,6 +313,9 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("error updating lease, requeuing: %v", err)
 	}
+
+	promLabels["pool"] = pool.Name
+	LeasesInUse.With(promLabels).Add(1)
 
 	if pool.Annotations == nil {
 		pool.Annotations = make(map[string]string)

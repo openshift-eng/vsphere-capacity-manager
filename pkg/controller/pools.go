@@ -93,14 +93,17 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	promLabels := prometheus.Labels{
-		"pool": poolKey,
+		"namespace": req.Namespace,
+		"pool":      req.Name,
 	}
 
 	poolsMu.Lock()
 	pools[poolKey] = pool
+
 	PoolMemoryAvailable.With(promLabels).Set(float64(pool.Status.MemoryAvailable))
 	PoolNetworksAvailable.With(promLabels).Set(float64(pool.Status.NetworkAvailable))
 	PoolCpusAvailable.With(promLabels).Set(float64(pool.Status.VCpusAvailable))
+
 	poolsMu.Unlock()
 
 	reconciledPools := reconcilePoolStates()
