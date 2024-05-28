@@ -164,11 +164,18 @@ func (l *LeaseReconciler) getCommonNetworkForLease(lease *v1.Lease) (*v1.Network
 	var exists bool
 	var leaseID string
 
+	if lease.Spec.VCpus == 0 && lease.Spec.Memory == 0 {
+		return nil, fmt.Errorf("network-only lease %s", lease.Name)
+	}
 	if leaseID, exists = lease.Labels[boskosIdLabel]; !exists {
 		return nil, fmt.Errorf("no lease label found for %s", lease.Name)
 	}
 
 	for _, _lease := range leases {
+		if _lease.Spec.VCpus == 0 && _lease.Spec.Memory == 0 {
+			// this is a network-only lease. do not consider it.
+			continue
+		}
 		if thisLeaseID, exists := _lease.Labels[boskosIdLabel]; !exists {
 			continue
 		} else if thisLeaseID != leaseID {

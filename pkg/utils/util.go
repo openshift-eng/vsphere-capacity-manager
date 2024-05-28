@@ -26,6 +26,7 @@ func init() {
 		export vsphere_datastore="{{.Datastore}}"
 		export vsphere_portgroup="{{.PortGroup}}"
 		export gateway="{{.Gateway}}"
+		export dns_server="{{.Gateway}}"
 		export vlanid="{{.VlanId}}"
 		export phydc="{{.IDatacenter}}"
 		export primaryrouterhostname="{{.PrimaryRouterHostname}}"`
