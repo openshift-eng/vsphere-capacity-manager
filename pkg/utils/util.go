@@ -66,7 +66,10 @@ func GenerateEnvVars(lease *v1.Lease, pool *v1.Pool, network *v1.Network) error 
 			break
 		}
 	}
-
+	tokens := strings.Split(portgroup, "/")
+	if len(tokens) >= 3 {
+		portgroup = tokens[len(tokens)-1]
+	}
 	inputs := struct {
 		Server                string
 		ComputeCluster        string
