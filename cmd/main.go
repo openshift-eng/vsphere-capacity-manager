@@ -4,13 +4,14 @@ import (
 	"log"
 	"os"
 
-	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
-	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/controller"
 	"k8s.io/klog/v2/textlogger"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
+
+	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
+	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/controller"
 )
 
 func main() {
@@ -28,6 +29,8 @@ func main() {
 		log.Printf("could not add types to scheme: %v", err)
 		os.Exit(1)
 	}
+
+	controller.InitMetrics()
 
 	if err := (&controller.PoolReconciler{}).
 		SetupWithManager(mgr); err != nil {
