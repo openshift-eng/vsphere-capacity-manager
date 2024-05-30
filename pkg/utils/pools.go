@@ -32,7 +32,7 @@ func GetFittingPools(lease *v1.Lease, pools []*v1.Pool) []*v1.Pool {
 	sort.Slice(fittingPools, func(i, j int) bool {
 		iPool := fittingPools[i]
 		jPool := fittingPools[j]
-		return iPool.Status.VCpusAvailable+iPool.Status.MemoryAvailable+iPool.Status.DatastoreAvailable+iPool.Status.NetworkAvailable <
+		return iPool.Status.VCpusAvailable+iPool.Status.MemoryAvailable+iPool.Status.DatastoreAvailable+iPool.Status.NetworkAvailable >
 			jPool.Status.VCpusAvailable+jPool.Status.MemoryAvailable+jPool.Status.DatastoreAvailable+jPool.Status.NetworkAvailable
 	})
 	return fittingPools
