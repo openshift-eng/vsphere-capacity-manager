@@ -25,6 +25,9 @@ spec:
     - jsonPath: .status.network-available
       name: Networks
       type: string
+    - jsonPath: .status.degraded
+      name: Degraded
+      type: string
     - jsonPath: .spec.noSchedule
       name: Disabled
       type: string
@@ -200,6 +203,10 @@ spec:
                 description: StorageAvailable is the amount of storage in GB available
                   in the pool
                 type: integer
+              degraded:
+                description: Degraded when true, the pool is in a degraded state.
+                  When a pool becomes degraded, scheduling is disabled.
+                type: boolean
               initialized:
                 description: Initialized when true, the status fields have been initialized
                 type: boolean
@@ -214,6 +221,8 @@ spec:
                 description: VCPUsAvailable is the number of vCPUs available in the
                   pool
                 type: integer
+            required:
+            - degraded
             type: object
         required:
         - spec

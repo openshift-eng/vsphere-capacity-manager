@@ -10,6 +10,8 @@ const (
 	POOLS_LAST_LEASE_UPDATE_ANNOTATION = "vspherecapacitymanager.splat.io/last-pool-update"
 	PoolFinalizer                      = "vsphere-capacity-manager.splat-team.io/pool-finalizer"
 	PoolKind                           = "Pool"
+	PoolAuthPath                       = "ci-auth-path"
+	PoolDisablePoolChecks              = "ci-disable-pool-checks"
 )
 
 // +genclient
@@ -23,6 +25,7 @@ const (
 // +kubebuilder:printcolumn:name="vCPUs",type=string,JSONPath=`.status.vcpus-available`
 // +kubebuilder:printcolumn:name="Memory(GB)",type=string,JSONPath=`.status.memory-available`
 // +kubebuilder:printcolumn:name="Networks",type=string,JSONPath=`.status.network-available`
+// +kubebuilder:printcolumn:name="Degraded",type=string,JSONPath=`.status.degraded`
 // +kubebuilder:printcolumn:name="Disabled",type=string,JSONPath=`.spec.noSchedule`
 // +kubebuilder:printcolumn:name="Excluded",type=string,JSONPath=`.spec.exclude`
 type Pool struct {
@@ -76,10 +79,12 @@ type PoolStatus struct {
 	// Networks is the number of networks available in the pool
 	// +optional
 	NetworkAvailable int `json:"network-available"`
-
 	// Initialized when true, the status fields have been initialized
 	// +optional
 	Initialized bool `json:"initialized"`
+	// Degraded when true, the pool is in a degraded state. When a pool becomes degraded,
+	// scheduling is disabled.
+	Degraded bool `json:"degraded"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

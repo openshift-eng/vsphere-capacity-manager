@@ -50,6 +50,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := (&controller.VSphereReconciler{}).
+		SetupWithManager(mgr); err != nil {
+		log.Printf("unable to create controller: %v", err)
+		os.Exit(1)
+	}
+
 	if err := mgr.Start(signals.SetupSignalHandler()); err != nil {
 		log.Printf("could not start manager: %v", err)
 		os.Exit(1)
