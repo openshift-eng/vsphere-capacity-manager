@@ -32,8 +32,12 @@ func GetFittingPools(lease *v1.Lease, pools []*v1.Pool) []*v1.Pool {
 	sort.Slice(fittingPools, func(i, j int) bool {
 		iPool := fittingPools[i]
 		jPool := fittingPools[j]
-		return iPool.Status.VCpusAvailable+iPool.Status.MemoryAvailable+iPool.Status.DatastoreAvailable+iPool.Status.NetworkAvailable >
-			jPool.Status.VCpusAvailable+jPool.Status.MemoryAvailable+jPool.Status.DatastoreAvailable+jPool.Status.NetworkAvailable
+		cpuScoreI := float64(iPool.Status.VCpusAvailable) / float64(iPool.Spec.VCpus)
+		memoryScoreI := float64(iPool.Status.MemoryAvailable) / float64(iPool.Spec.Memory)
+		cpuScoreJ := float64(jPool.Status.VCpusAvailable) / float64(jPool.Spec.VCpus)
+		memoryScoreJ := float64(jPool.Status.MemoryAvailable) / float64(jPool.Spec.Memory)
+
+		return cpuScoreI+memoryScoreI > cpuScoreJ+memoryScoreJ
 	})
 	return fittingPools
 }
