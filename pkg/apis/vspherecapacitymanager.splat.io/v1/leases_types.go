@@ -9,6 +9,7 @@ const (
 	LeaseKind      = "Lease"
 	APIGroupName   = "vsphere-capacity-manager.splat-team.io"
 	LeaseFinalizer = "vsphere-capacity-manager.splat-team.io/lease-finalizer"
+	LeaseNamespace = "vsphere-capacity-manager.splat-team.io/lease-namespace"
 )
 
 // +genclient
