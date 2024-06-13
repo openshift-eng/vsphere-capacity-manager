@@ -52,6 +52,8 @@ func (l *NamespaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func (l *NamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log.Printf("Reconciling namespace: %v", req)
+	defer log.Print("Finished reconciling namespace")
 
 	ns := &corev1.Namespace{}
 	err := l.Get(ctx, types.NamespacedName{Name: req.Name, Namespace: l.Namespace}, ns)
@@ -72,6 +74,9 @@ func (l *NamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			continue
 		}
 		if leaseNs, ok := lease.ObjectMeta.Labels[v1.LeaseNamespace]; ok {
+			if leaseNs != req.Name {
+				continue
+			}
 			log.Printf("lease %s is referenced by deleted namespace %s. will delete lease.", lease.Name, leaseNs)
 			leasesToDelete = append(leasesToDelete, lease.DeepCopy())
 		}
