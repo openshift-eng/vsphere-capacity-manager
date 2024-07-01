@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
+	"path"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -70,12 +70,11 @@ func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool) []*v1.Network {
 	networksInPool := make(map[string]*v1.Network)
 	availableNetworks := make([]*v1.Network, 0)
 	for _, portGroupPath := range pool.Spec.Topology.Networks {
-		pathParts := strings.Split(portGroupPath, "/")
-		lastToken := pathParts[len(pathParts)-1]
+		_, networkName := path.Split(portGroupPath)
 
 		for _, network := range networks {
 			if (*network.Spec.PodName == pool.Spec.IBMPoolSpec.Pod) &&
-				(network.Spec.PortGroupName == lastToken) {
+				(network.Spec.PortGroupName == networkName) {
 				networksInPool[network.Name] = network
 				break
 			}
@@ -111,55 +110,79 @@ func reconcilePoolStates() []*v1.Pool {
 	}
 	var outList []*v1.Pool
 
+	networksInUse := make(map[string]map[string]string)
+
 	for poolName, pool := range pools {
 		vcpus := 0
 		memory := 0
-		networks := 0
+
 		for _, lease := range leases {
 			for _, ownerRef := range lease.OwnerReferences {
 				if ownerRef.Kind == pool.Kind && ownerRef.Name == pool.Name {
 					vcpus += lease.Spec.VCpus
 					memory += lease.Spec.Memory
-					networks += lease.Spec.Networks
+
+					var serverNetworks map[string]string
+					var exists bool
+
+					if serverNetworks, exists = networksInUse[lease.Status.Server]; exists {
+						serverNetworks = networksInUse[lease.Status.Server]
+					} else {
+						serverNetworks = make(map[string]string)
+						networksInUse[lease.Status.Server] = serverNetworks
+					}
+					for _, networkPath := range lease.Status.Topology.Networks {
+						_, networkName := path.Split(networkPath)
+						serverNetworks[networkName] = networkName
+					}
 					break
 				}
 			}
 		}
 		pool.Status.VCpusAvailable = pool.Spec.VCpus - vcpus
 		pool.Status.MemoryAvailable = pool.Spec.Memory - memory
-		pool.Status.NetworkAvailable = len(pool.Spec.Topology.Networks) - networks
+
 		pools[poolName] = pool
 		outList = append(outList, pool)
+	}
+
+	for _, pool := range outList {
+		availableNetworks := 0
+		for _, network := range pool.Spec.Topology.Networks {
+			_, networkName := path.Split(network)
+			serverNetworks := networksInUse[pool.Spec.Server]
+			if _, ok := serverNetworks[networkName]; !ok {
+				availableNetworks++
+			} else {
+				log.Printf("network %s already in use", networkName)
+			}
+
+		}
+		pool.Status.NetworkAvailable = availableNetworks
 	}
 
 	return outList
 }
 
-func (l *LeaseReconciler) bumpPool(ctx context.Context, lease *v1.Lease) error {
-	pool := &v1.Pool{}
-	for _, ownerRef := range lease.OwnerReferences {
-		if ownerRef.Kind == "Pool" {
-			err := l.Get(ctx, types.NamespacedName{
-				Name:      ownerRef.Name,
-				Namespace: lease.Namespace,
-			}, pool)
-			if err != nil {
-				log.Printf("error getting pool object: %v", err)
-				return err
-			}
-			break
+func (l *LeaseReconciler) triggerPoolUpdates(ctx context.Context) {
+	for _, pool := range pools {
+
+		err := l.Client.Get(ctx, types.NamespacedName{Name: pool.Name, Namespace: pool.Namespace}, pool)
+		if err != nil {
+			log.Printf("error getting pool %s: %v", pool.Name, err)
+			continue
+		}
+
+		if pool.Annotations == nil {
+			pool.Annotations = make(map[string]string)
+		}
+
+		pool.Annotations["last-updated"] = time.Now().Format(time.RFC3339)
+		err = l.Client.Update(ctx, pool)
+		if err != nil {
+			log.Printf("error updating pool %s annotations: %v", pool.Name, err)
 		}
 	}
-	if pool.Annotations == nil {
-		pool.Annotations = make(map[string]string)
-	}
-
-	pool.Annotations["last-updated"] = time.Now().Format(time.RFC3339)
-	err := l.Client.Update(ctx, pool)
-	if err != nil {
-		return fmt.Errorf("error updating pool, requeuing: %v", err)
-	}
-	return nil
 }
 
 // returns a common portgroup that satisfies all known leases for this job. common port groups are scoped
@@ -213,6 +236,21 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	if len(lease.Status.Phase) == 0 {
+		lease.Status.Phase = v1.PHASE_PENDING
+		lease.Status.Topology.Datacenter = "pending"
+		lease.Status.Topology.Datastore = "/pending/datastore/pending"
+		lease.Status.Topology.ComputeCluster = "/pending/host/pending"
+		lease.Status.Server = "pending"
+		lease.Status.Zone = "pending"
+		lease.Status.Region = "pending"
+		lease.Status.Name = "pending"
+		lease.Status.Topology.Networks = append(lease.Status.Topology.Networks, "/pending/network/pending")
+		if err := l.Status().Update(ctx, lease); err != nil {
+			return ctrl.Result{}, fmt.Errorf("unable to set the initial status on the lease %s: %w", lease.Name, err)
+		}
+	}
+
 	promLabels := make(prometheus.Labels)
 	promLabels["namespace"] = req.Namespace
 
@@ -233,6 +271,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		LeasesInUse.With(promLabels).Dec()
 		reconcilePoolStates()
 		poolsMu.Unlock()
+		l.triggerPoolUpdates(ctx)
 		return ctrl.Result{}, nil
 	}
 
@@ -328,11 +367,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		pool.Annotations = make(map[string]string)
 	}
 
-	err = l.bumpPool(ctx, lease)
-	if err != nil {
-		log.Printf("error bumping pool: %v", err)
-		return ctrl.Result{}, err
-	}
+	l.triggerPoolUpdates(ctx)
 
 	return ctrl.Result{}, nil
 }
