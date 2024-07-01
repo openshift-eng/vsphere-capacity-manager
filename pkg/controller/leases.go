@@ -125,9 +125,7 @@ func reconcilePoolStates() []*v1.Pool {
 					var serverNetworks map[string]string
 					var exists bool
 
-					if serverNetworks, exists = networksInUse[lease.Status.Server]; exists {
-						serverNetworks = networksInUse[lease.Status.Server]
-					} else {
+					if serverNetworks, exists = networksInUse[lease.Status.Server]; !exists {
 						serverNetworks = make(map[string]string)
 						networksInUse[lease.Status.Server] = serverNetworks
 					}
