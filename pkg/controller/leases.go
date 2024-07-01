@@ -151,10 +151,7 @@ func reconcilePoolStates() []*v1.Pool {
 			serverNetworks := networksInUse[pool.Spec.Server]
 			if _, ok := serverNetworks[networkName]; !ok {
 				availableNetworks++
-			} else {
-				log.Printf("network %s already in use", networkName)
 			}
-
 		}
 		pool.Status.NetworkAvailable = availableNetworks
 	}

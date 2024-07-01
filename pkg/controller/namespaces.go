@@ -2,18 +2,15 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
-	"log"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/types"
-
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
+	"log"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"time"
 )
 
 type NamespaceReconciler struct {
@@ -36,52 +33,48 @@ type NamespaceReconciler struct {
 }
 
 func (l *NamespaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	if err := ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.Namespace{}).
-		Complete(l); err != nil {
-		return fmt.Errorf("error setting up controller: %w", err)
-	}
-
 	// Set up API helpers from the manager.
 	l.Client = mgr.GetClient()
 	l.Scheme = mgr.GetScheme()
 	l.Recorder = mgr.GetEventRecorderFor("namespaces-controller")
 	l.RESTMapper = mgr.GetRESTMapper()
 
+	go func() {
+		ctx := context.TODO()
+		for {
+			log.Printf("checking for abandoned leases")
+			l.PruneAbandonedLeases(ctx)
+			time.Sleep(5 * time.Minute)
+		}
+	}()
 	return nil
 }
 
-func (l *NamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log.Printf("Reconciling namespace: %v", req)
-	defer log.Print("Finished reconciling namespace")
-
-	ns := &corev1.Namespace{}
-	err := l.Get(ctx, types.NamespacedName{Name: req.Name, Namespace: l.Namespace}, ns)
-
+func (l *NamespaceReconciler) PruneAbandonedLeases(ctx context.Context) {
+	namespaces := &corev1.NamespaceList{}
+	err := l.Client.List(ctx, namespaces)
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-
-	if ns.DeletionTimestamp == nil {
-		return ctrl.Result{}, nil
+		log.Printf("Failed to list namespaces: %v", err)
+		return
 	}
 
 	var leasesToDelete []*v1.Lease
-
 	poolsMu.Lock()
 	for _, lease := range leases {
-		if lease.ObjectMeta.Labels == nil {
-			continue
-		}
 		if leaseNs, ok := lease.ObjectMeta.Labels[v1.LeaseNamespace]; ok {
-			if leaseNs != req.Name {
+			nsFound := false
+			for _, ns := range namespaces.Items {
+				if ns.Name == leaseNs {
+					nsFound = true
+				}
+			}
+			if nsFound {
 				continue
 			}
 			log.Printf("lease %s is referenced by deleted namespace %s. will delete lease.", lease.Name, leaseNs)
 			leasesToDelete = append(leasesToDelete, lease.DeepCopy())
 		}
 	}
-	poolsMu.Unlock()
 
 	for _, lease := range leasesToDelete {
 		log.Printf("deleting lease %s", lease.Name)
@@ -91,5 +84,5 @@ func (l *NamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	return ctrl.Result{}, nil
+	defer poolsMu.Unlock()
 }
