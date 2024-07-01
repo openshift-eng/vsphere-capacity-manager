@@ -217,7 +217,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	promLabels["namespace"] = req.Namespace
 
 	if lease.DeletionTimestamp != nil {
-		log.Print("Lease is being deleted")
+		log.Printf("lease %s is being deleted at %s", lease.Name, lease.DeletionTimestamp.String())
 		lease.Finalizers = []string{}
 		err := l.Update(ctx, lease)
 		if err != nil {
