@@ -66,7 +66,7 @@ func (l *LeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // getAvailableNetworks retrieves networks which are not owned by a lease
-func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool) []*v1.Network {
+func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool, networkType v1.NetworkType) []*v1.Network {
 	networksInPool := make(map[string]*v1.Network)
 	availableNetworks := make([]*v1.Network, 0)
 	for _, portGroupPath := range pool.Spec.Topology.Networks {
@@ -94,6 +94,17 @@ func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool) []*v1.Network {
 			if hasOwner {
 				break
 			}
+		}
+
+		thisNetworkType := string(v1.NetworkTypeSingleTenant)
+		if network.ObjectMeta.Labels != nil {
+			if val, exists := network.ObjectMeta.Labels[v1.NetworkTypeLabel]; exists {
+				log.Printf("network found with NeworkTypeLabel: %s", val)
+				thisNetworkType = val
+			}
+		}
+		if thisNetworkType != string(networkType) {
+			continue
 		}
 		if !hasOwner {
 			availableNetworks = append(availableNetworks, network)
@@ -129,6 +140,7 @@ func reconcilePoolStates() []*v1.Pool {
 						serverNetworks = make(map[string]string)
 						networksInUse[lease.Status.Server] = serverNetworks
 					}
+
 					for _, networkPath := range lease.Status.Topology.Networks {
 						_, networkName := path.Split(networkPath)
 						serverNetworks[networkName] = networkName
@@ -246,6 +258,15 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	if lease.Finalizers == nil {
+		log.Print("setting finalizer on lease")
+		lease.Finalizers = []string{v1.LeaseFinalizer}
+		err := l.Client.Update(ctx, lease)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("error setting lease finalizer: %w", err)
+		}
+	}
+
 	promLabels := make(prometheus.Labels)
 	promLabels["namespace"] = req.Namespace
 
@@ -263,7 +284,9 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		poolsMu.Lock()
 		delete(leases, leaseKey)
-		LeasesInUse.With(promLabels).Dec()
+		if len(promLabels) >= 2 {
+			LeasesInUse.With(promLabels).Dec()
+		}
 		reconcilePoolStates()
 		poolsMu.Unlock()
 		l.triggerPoolUpdates(ctx)
@@ -311,14 +334,21 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		network, err = l.getCommonNetworkForLease(lease)
 		if err != nil {
 			log.Printf("error getting common network for lease, will attempt to allocate a new one: %v", err)
-			availableNetworks = l.getAvailableNetworks(pool)
+
+			if len(lease.Spec.NetworkType) == 0 {
+				lease.Spec.NetworkType = v1.NetworkTypeSingleTenant
+			}
+
+			availableNetworks = l.getAvailableNetworks(pool, lease.Spec.NetworkType)
 		} else {
 			availableNetworks = []*v1.Network{network}
 		}
 
 		poolsMu.Unlock()
 
+		log.Printf("available networks: %d - lease %s requested networks: %d", len(availableNetworks), lease.Name, lease.Spec.Networks)
 		if len(availableNetworks) < lease.Spec.Networks {
+			lease.OwnerReferences = nil
 			return ctrl.Result{}, fmt.Errorf("lease requires %d networks, %d networks available", lease.Spec.Networks, len(availableNetworks))
 		}
 
@@ -333,7 +363,9 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			})
 			networks = append(networks, fmt.Sprintf("/%s/network/%s", lease.Status.Topology.Datacenter, network.Spec.PortGroupName))
 		}
-
+		if len(networks) > 1 {
+			log.Printf("%s requested more than one network", lease.Name)
+		}
 		lease.Status.Topology.Networks = networks
 	}
 

@@ -5,11 +5,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+type NetworkType string
+
 const (
-	LeaseKind      = "Lease"
-	APIGroupName   = "vsphere-capacity-manager.splat-team.io"
-	LeaseFinalizer = "vsphere-capacity-manager.splat-team.io/lease-finalizer"
-	LeaseNamespace = "vsphere-capacity-manager.splat-team.io/lease-namespace"
+	LeaseKind               = "Lease"
+	APIGroupName            = "vsphere-capacity-manager.splat-team.io"
+	LeaseFinalizer          = "vsphere-capacity-manager.splat-team.io/lease-finalizer"
+	LeaseNamespace          = "vsphere-capacity-manager.splat-team.io/lease-namespace"
+	NetworkTypeDisconnected = NetworkType("disconnected")
+	NetworkTypeSingleTenant = NetworkType("single-tenant")
+	NetworkTypeMultiTenant  = NetworkType("multi-tenant")
 )
 
 // +genclient
@@ -47,6 +52,17 @@ type LeaseSpec struct {
 	// pool
 	// +optional
 	RequiredPool string `json:"required-pool,omitempty"`
+
+	// NetworkType defines the type of network required by the lease.
+	// by default, all networks are treated as single-tenant. single-tenant networks
+	// are only used by one CI jobs.  multi-tenant networks reside on a
+	// VLAN which may be used by multiple jobs.  disconnected networks aren't yet
+	// supported.
+	// +kubebuilder:validation:Enum="";disconnected;single-tenant;multi-tenant
+	// +kubebuilder:default=single-tenant
+	// +optional
+	NetworkType NetworkType `json:"network-type"`
+
 	// BoskosLeaseID is the ID of the lease in Boskos associated with this lease
 	// +optional
 	BoskosLeaseID string `json:"boskos-lease-id,omitempty"`
