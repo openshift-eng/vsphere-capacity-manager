@@ -112,7 +112,7 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			reconciledPool.Status.DeepCopyInto(&pool.Status)
 			err := l.Client.Status().Update(ctx, pool)
 			if err != nil {
-				return ctrl.Result{}, fmt.Errorf("error udpating pool status: %w", err)
+				return ctrl.Result{}, fmt.Errorf("error updating pool status: %w", err)
 			}
 		}
 	}
