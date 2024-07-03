@@ -54,6 +54,19 @@ spec:
                 description: Memory is the amount of memory in GB allocated for this
                   lease
                 type: integer
+              network-type:
+                default: single-tenant
+                description: NetworkType defines the type of network required by the
+                  lease. by default, all networks are treated as single-tenant. single-tenant
+                  networks are only used by one CI jobs.  multi-tenant networks reside
+                  on a VLAN which may be used by multiple jobs.  disconnected networks
+                  aren't yet supported.
+                enum:
+                - ""
+                - disconnected
+                - single-tenant
+                - multi-tenant
+                type: string
               networks:
                 description: Networks is the number of networks requested
                 type: integer
