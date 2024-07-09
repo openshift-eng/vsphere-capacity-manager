@@ -130,6 +130,8 @@ if [[ "${CLUSTER_PROFILE_NAME:-}" == "vsphere-elastic" ]]; then
 fi
 ```
 
+This allows a single chain to support both VCM and legacy jobs.
+
 # Appendix
 
 ## Networks
