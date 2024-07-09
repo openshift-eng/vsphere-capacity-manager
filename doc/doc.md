@@ -112,7 +112,23 @@ VCM is implemented in such a way that jobs which are not migrated to the `vspher
 | upi-conf-vsphere-ova | upi-conf-vsphere-ova-vcm
 | upi-conf-vsphere-zones | upi-conf-vsphere-zones-vcm
 
-For each of these steps, a check is performed very early in the script.
+For each of these steps, a check is performed very early in the script. 
+
+For VCM steps:
+```sh
+if [[ "${CLUSTER_PROFILE_NAME:-}" != "vsphere-elastic" ]]; then
+  echo "using legacy sibling of this step"
+  exit 0
+fi
+```
+
+For equivilent non-VCM steps:
+```sh
+if [[ "${CLUSTER_PROFILE_NAME:-}" == "vsphere-elastic" ]]; then
+  echo "using VCM sibling of this step"
+  exit 0
+fi
+```
 
 # Appendix
 
