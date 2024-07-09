@@ -340,6 +340,12 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			}
 
 			availableNetworks = l.getAvailableNetworks(pool, lease.Spec.NetworkType)
+
+			if lease.Spec.NetworkType == v1.NetworkTypeMultiTenant {
+				// for mutli-tenant leases, there is no reason they can't fall back to single-tenant if there aren't
+				// any multi-tenant leases available.
+				availableNetworks = append(availableNetworks, l.getAvailableNetworks(pool, v1.NetworkTypeSingleTenant)...)
+			}
 		} else {
 			availableNetworks = []*v1.Network{network}
 		}
