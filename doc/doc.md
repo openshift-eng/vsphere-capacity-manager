@@ -263,3 +263,7 @@ Be sure that your step mounts the credentials with:
     mount_path: /var/run/vault/vsphere-ibmcloud-config
   ...
 ```
+
+## Enabling Jobs in Vault for multi-tenant Networks
+
+Jobs can be enabled for multi-tenant networks by adding the `JOB_SAFE_NAME` to the environment variable `MULTI_TENANT_CAPABLE_WORKFLOWS` in `multi-capable-workflows.sh` in the Vault collection `selfservice/vsphere/ibmcloud/config`.
