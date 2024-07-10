@@ -113,6 +113,15 @@ func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool, networkType v1.Net
 	return availableNetworks
 }
 
+func getIBMDatacenterAndPod(server string) (string, string) {
+	for _, pool := range pools {
+		if pool.Spec.Server == server {
+			return pool.Spec.IBMPoolSpec.Datacenter, pool.Spec.IBMPoolSpec.Pod
+		}
+	}
+	return "", ""
+}
+
 // reconcilePoolStates updates the states of all pools. this ensures we have the most up-to-date state of the pools
 // before we attempt to reconcile any leases. the pool resource statuses are not updated.
 func reconcilePoolStates() []*v1.Pool {
@@ -136,9 +145,11 @@ func reconcilePoolStates() []*v1.Pool {
 					var serverNetworks map[string]string
 					var exists bool
 
-					if serverNetworks, exists = networksInUse[lease.Status.Server]; !exists {
+					dc, pod := getIBMDatacenterAndPod(lease.Status.Server)
+					dcId := fmt.Sprintf("dcid-%s-%s", dc, pod)
+					if serverNetworks, exists = networksInUse[dcId]; !exists {
 						serverNetworks = make(map[string]string)
-						networksInUse[lease.Status.Server] = serverNetworks
+						networksInUse[dcId] = serverNetworks
 					}
 
 					for _, networkPath := range lease.Status.Topology.Networks {
@@ -160,7 +171,8 @@ func reconcilePoolStates() []*v1.Pool {
 		availableNetworks := 0
 		for _, network := range pool.Spec.Topology.Networks {
 			_, networkName := path.Split(network)
-			serverNetworks := networksInUse[pool.Spec.Server]
+			dcId := fmt.Sprintf("dcid-%s-%s", pool.Spec.IBMPoolSpec.Datacenter, pool.Spec.IBMPoolSpec.Pod)
+			serverNetworks := networksInUse[dcId]
 			if _, ok := serverNetworks[networkName]; !ok {
 				availableNetworks++
 			}
