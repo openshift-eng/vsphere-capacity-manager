@@ -3,6 +3,7 @@ package test
 import (
 	"fmt"
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
+	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/controller"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -25,6 +26,7 @@ func GetLease() *lease {
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "sample-lease-",
 				Namespace:    "default",
+				Labels:       make(map[string]string),
 			},
 		},
 	}
@@ -40,6 +42,12 @@ func (r *lease) WithShape(shape shape) *lease {
 	r.lease.Spec.Memory = int(16 * int64(shape))
 	r.lease.Spec.Storage = int(120 * int64(shape))
 	r.lease.Spec.Networks = int(1 * int64(shape))
+
+	return r
+}
+
+func (r *lease) WithBoskosID(boskosID string) *lease {
+	r.lease.Labels[controller.BoskosIdLabel] = boskosID
 
 	return r
 }

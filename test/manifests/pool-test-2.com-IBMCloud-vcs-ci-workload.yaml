@@ -1,0 +1,59 @@
+apiVersion: vsphere-capacity-manager.splat-team.io/v1
+kind: Pool
+metadata:
+  creationTimestamp: null
+  name: test-2.com-IBMCloud-vcs-ci-workload
+spec:
+  exclude: false
+  ibmPoolSpec:
+    datacenter: dal10
+    pod: dal10.pod03
+  memory: 2684
+  name: test-2.com-IBMCloud-vcs-ci-workload
+  region: us-central
+  server: test-2.com
+  storage: 0
+  topology:
+    computeCluster: /cidatacenter-2/host/vcs-ci-workload
+    datacenter: /cidatacenter-2
+    datastore: /cidatacenter-2/datastore/vsanDatastore
+    networks:
+    - /cidatacenter-2/network/ci-vlan-1302
+    - /cidatacenter-2/network/ci-vlan-1300
+    - /cidatacenter-2/network/ci-vlan-1298
+    - /cidatacenter-2/network/ci-vlan-1296
+    - /cidatacenter-2/network/ci-vlan-1289
+    - /cidatacenter-2/network/ci-vlan-1287
+    - /cidatacenter-2/network/ci-vlan-1284
+    - /cidatacenter-2/network/ci-vlan-1279
+    - /cidatacenter-2/network/ci-vlan-1274
+    - /cidatacenter-2/network/ci-vlan-1272
+    - /cidatacenter-2/network/ci-vlan-1271
+    - /cidatacenter-2/network/ci-vlan-1260
+    - /cidatacenter-2/network/ci-vlan-1255
+    - /cidatacenter-2/network/ci-vlan-1254
+    - /cidatacenter-2/network/ci-vlan-1249
+    - /cidatacenter-2/network/ci-vlan-1246
+    - /cidatacenter-2/network/ci-vlan-1243
+    - /cidatacenter-2/network/ci-vlan-1240
+    - /cidatacenter-2/network/ci-vlan-1238
+    - /cidatacenter-2/network/ci-vlan-1237
+    - /cidatacenter-2/network/ci-vlan-1235
+    - /cidatacenter-2/network/ci-vlan-1234
+    - /cidatacenter-2/network/ci-vlan-1233
+    - /cidatacenter-2/network/ci-vlan-1232
+    - /cidatacenter-2/network/ci-vlan-1229
+    - /cidatacenter-2/network/ci-vlan-1227
+    - /cidatacenter-2/network/ci-vlan-1225
+    - /cidatacenter-2/network/ci-vlan-1207
+    - /cidatacenter-2/network/ci-vlan-1197
+    - /cidatacenter-2/network/ci-vlan-1148
+    - /cidatacenter-2/network/ci-vlan-956
+  vcpus: 240
+  zone: us-central-1a
+status:
+  datastore-available: 0
+  initialized: false
+  memory-available: 0
+  network-available: 0
+  vcpus-available: 0
