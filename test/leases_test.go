@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -405,6 +406,72 @@ var _ = Describe("Lease management", func() {
 			By("waiting for the lease to be deleted", func() {
 				Eventually(func() bool {
 					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease) != nil
+				}).Should(BeTrue())
+			})
+		})
+	})
+	It("should acquire two lease in two different vcenters, then delete the leases", func() {
+		var lease1 *v1.Lease
+		var lease2 *v1.Lease
+		By("creating leases", func() {
+			// Grab pool from one server
+			lease1 = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-ci-workload").WithBoskosID("vsphere-elastic-88").Build()
+			Expect(lease1).NotTo(BeNil())
+			Expect(k8sClient.Create(ctx, lease1)).To(Succeed())
+
+			// Grab pool from different server
+			lease2 = GetLease().WithShape(SHAPE_SMALL).WithPool("test-2.com-ibmcloud-vcs-ci-workload").WithBoskosID("vsphere-elastic-88").Build()
+			Expect(lease2).NotTo(BeNil())
+			Expect(k8sClient.Create(ctx, lease2)).To(Succeed())
+
+		})
+
+		By("waiting for leases to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1)
+				if lease1.Status.Phase != v1.PHASE_FULFILLED {
+					return false
+				}
+
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease2), lease2)
+				return lease2.Status.Phase == v1.PHASE_FULFILLED
+			}).Should(BeTrue())
+		})
+
+		leases := &v1.LeaseList{}
+		By("checking the lease", func() {
+			By("lease should be owned by a pool and network", func() {
+				Eventually(func() bool {
+					Expect(k8sClient.List(ctx, leases, client.InNamespace(namespaceName))).To(Succeed())
+					if len(leases.Items) != 2 {
+						return false
+					}
+
+					for _, lease := range leases.Items {
+						result, _ := IsLeaseOwnedByKinds(&lease, "Network", "Pool")
+						if result == false {
+							return false
+						}
+					}
+					return true
+				}).Should(BeTrue())
+			})
+			By("leases should all have same network", func() {
+				lease1Network := lease1.Status.Topology.Networks[0][strings.LastIndex(lease1.Status.Topology.Networks[0], "/"):]
+				lease2Network := lease2.Status.Topology.Networks[0][strings.LastIndex(lease2.Status.Topology.Networks[0], "/"):]
+
+				Expect(lease1Network).To(Equal(lease2Network))
+			})
+		})
+
+		By("deleting the leases", func() {
+			By("by deleting the resource lease", func() {
+				Expect(k8sClient.Delete(ctx, lease1)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, lease2)).To(Succeed())
+			})
+			By("waiting for the lease to be deleted", func() {
+				Eventually(func() bool {
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1) != nil
 				}).Should(BeTrue())
 			})
 		})

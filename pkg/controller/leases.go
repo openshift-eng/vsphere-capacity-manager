@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	boskosIdLabel = "boskos-lease-id"
+	BoskosIdLabel = "boskos-lease-id"
 )
 
 type LeaseReconciler struct {
@@ -213,7 +213,7 @@ func (l *LeaseReconciler) getCommonNetworkForLease(lease *v1.Lease) (*v1.Network
 	if lease.Spec.VCpus == 0 && lease.Spec.Memory == 0 {
 		return nil, fmt.Errorf("network-only lease %s", lease.Name)
 	}
-	if leaseID, exists = lease.Labels[boskosIdLabel]; !exists {
+	if leaseID, exists = lease.Labels[BoskosIdLabel]; !exists {
 		return nil, fmt.Errorf("no lease label found for %s", lease.Name)
 	}
 
@@ -222,11 +222,9 @@ func (l *LeaseReconciler) getCommonNetworkForLease(lease *v1.Lease) (*v1.Network
 			// this is a network-only lease. do not consider it.
 			continue
 		}
-		if thisLeaseID, exists := _lease.Labels[boskosIdLabel]; !exists {
+		if thisLeaseID, exists := _lease.Labels[BoskosIdLabel]; !exists {
 			continue
 		} else if thisLeaseID != leaseID {
-			continue
-		} else if lease.Status.Server != _lease.Status.Server {
 			continue
 		}
 		for _, ownerRef := range _lease.OwnerReferences {
