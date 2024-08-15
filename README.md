@@ -189,3 +189,34 @@ To accommodate this, the scheduler will attempt to determine if a related lease 
 3. The lease resides in the same vCenter
 
 When leases cross vCenters, those leases will have different network leases.
+
+# `oc` Plugin Installation
+
+An `oc` plugin has been created which enables easier mangagement of the vsphere capacity manager.  To install this plugin:
+
+```sh
+cp plugin/oc-vcm /usr/local/bin
+
+oc vcm
+usage: oc-vcm [-h]
+              {cordon,uncordon,exclude,include,set-capacity,add-vlan,drop-vlan,status,networks,split-network} ...
+
+Process some commands.
+
+positional arguments:
+  {cordon,uncordon,exclude,include,set-capacity,add-vlan,drop-vlan,status,networks,split-network}
+                        Command to execute
+    cordon              Cordon a pool
+    uncordon            Uncordon a pool
+    exclude             Exclude a pool
+    include             Include a pool
+    set-capacity        Set capacity
+    add-vlan            Add VLAN
+    drop-vlan           Drop VLAN
+    status              Get status of the capacity manager
+    networks            List networks
+    split-network       Split a network
+
+options:
+  -h, --help            show this help message and exit
+```
