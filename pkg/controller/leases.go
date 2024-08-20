@@ -282,7 +282,21 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if lease.DeletionTimestamp != nil {
 		log.Printf("lease %s is being deleted at %s", lease.Name, lease.DeletionTimestamp.String())
-		lease.Finalizers = []string{}
+
+		// preserve finalizers not associated with VCM
+		if lease.Finalizers != nil {
+			var preservedFinalizers []string
+
+			for _, finalizer := range lease.Finalizers {
+				if finalizer == v1.LeaseFinalizer {
+					continue
+				}
+
+				preservedFinalizers = append(preservedFinalizers, finalizer)
+			}
+			lease.Finalizers = preservedFinalizers
+		}
+
 		err := l.Update(ctx, lease)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("error dropping finalizers from lease: %w", err)
