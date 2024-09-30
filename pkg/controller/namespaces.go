@@ -52,6 +52,10 @@ func (l *NamespaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func (l *NamespaceReconciler) PruneAbandonedLeases(ctx context.Context) {
 	namespaces := &corev1.NamespaceList{}
+
+	reconcileLock.Lock()
+	defer reconcileLock.Unlock()
+
 	err := l.Client.List(ctx, namespaces)
 	if err != nil {
 		log.Printf("Failed to list namespaces: %v", err)
@@ -59,7 +63,7 @@ func (l *NamespaceReconciler) PruneAbandonedLeases(ctx context.Context) {
 	}
 
 	var leasesToDelete []*v1.Lease
-	poolsMu.Lock()
+
 	for _, lease := range leases {
 		if leaseNs, ok := lease.ObjectMeta.Labels[v1.LeaseNamespace]; ok {
 			nsFound := false
@@ -83,6 +87,4 @@ func (l *NamespaceReconciler) PruneAbandonedLeases(ctx context.Context) {
 			log.Printf("error deleting lease %s: %s", lease.Name, err)
 		}
 	}
-
-	defer poolsMu.Unlock()
 }

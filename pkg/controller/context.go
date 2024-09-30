@@ -6,8 +6,8 @@ import (
 )
 
 var (
-	poolsMu  sync.Mutex
-	pools    = make(map[string]*v1.Pool)
-	leases   = make(map[string]*v1.Lease)
-	networks = make(map[string]*v1.Network)
+	reconcileLock sync.Mutex
+	pools         = make(map[string]*v1.Pool)
+	leases        = make(map[string]*v1.Lease)
+	networks      = make(map[string]*v1.Network)
 )

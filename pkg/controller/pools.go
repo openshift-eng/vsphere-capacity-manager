@@ -54,6 +54,9 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	log.Print("Reconciling pool")
 	defer log.Print("Finished reconciling pool")
 
+	reconcileLock.Lock()
+	defer reconcileLock.Unlock()
+
 	poolKey := fmt.Sprintf("%s/%s", req.Namespace, req.Name)
 
 	// Fetch the Pool instance.
@@ -71,9 +74,7 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				return ctrl.Result{}, fmt.Errorf("error updating pool: %w", err)
 			}
 		}
-		poolsMu.Lock()
 		delete(pools, poolKey)
-		poolsMu.Unlock()
 		return ctrl.Result{}, nil
 	}
 
@@ -97,14 +98,11 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		"pool":      req.Name,
 	}
 
-	poolsMu.Lock()
 	pools[poolKey] = pool
 
 	PoolMemoryAvailable.With(promLabels).Set(float64(pool.Status.MemoryAvailable))
 	PoolNetworksAvailable.With(promLabels).Set(float64(pool.Status.NetworkAvailable))
 	PoolCpusAvailable.With(promLabels).Set(float64(pool.Status.VCpusAvailable))
-
-	poolsMu.Unlock()
 
 	reconciledPools := reconcilePoolStates()
 	for _, reconciledPool := range reconciledPools {

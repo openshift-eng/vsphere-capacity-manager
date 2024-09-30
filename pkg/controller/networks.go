@@ -51,6 +51,9 @@ func (l *NetworkReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	log.Print("Reconciling network")
 	defer log.Print("Finished reconciling network")
 
+	reconcileLock.Lock()
+	defer reconcileLock.Unlock()
+
 	networkKey := fmt.Sprintf("%s/%s", req.Namespace, req.Name)
 
 	// Fetch the Pool instance.
@@ -68,9 +71,7 @@ func (l *NetworkReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				return ctrl.Result{}, fmt.Errorf("error updating network: %w", err)
 			}
 		}
-		poolsMu.Lock()
 		delete(pools, networkKey)
-		poolsMu.Unlock()
 		return ctrl.Result{}, nil
 	}
 
@@ -83,8 +84,6 @@ func (l *NetworkReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
-	poolsMu.Lock()
 	networks[networkKey] = network
-	poolsMu.Unlock()
 	return ctrl.Result{}, nil
 }
