@@ -57,11 +57,9 @@ func (l *LeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	l.Scheme = mgr.GetScheme()
 	l.Recorder = mgr.GetEventRecorderFor("leases-controller")
 	l.RESTMapper = mgr.GetRESTMapper()
-	poolsMu.Lock()
 	leases = make(map[string]*v1.Lease)
 	pools = make(map[string]*v1.Pool)
 	networks = make(map[string]*v1.Network)
-	poolsMu.Unlock()
 	return nil
 }
 
@@ -125,9 +123,6 @@ func getIBMDatacenterAndPod(server string) (string, string) {
 // reconcilePoolStates updates the states of all pools. this ensures we have the most up-to-date state of the pools
 // before we attempt to reconcile any leases. the pool resource statuses are not updated.
 func reconcilePoolStates() []*v1.Pool {
-	if poolsMu.TryLock() {
-		defer poolsMu.Unlock()
-	}
 	var outList []*v1.Pool
 
 	networksInUse := make(map[string]map[string]string)
@@ -243,6 +238,9 @@ func (l *LeaseReconciler) getCommonNetworkForLease(lease *v1.Lease) (*v1.Network
 
 func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var err error
+	reconcileLock.Lock()
+	defer reconcileLock.Unlock()
+
 	log.Print("Reconciling lease")
 	defer log.Print("Finished reconciling lease")
 
@@ -306,20 +304,16 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			promLabels["pool"] = ownRef.Name
 		}
 
-		poolsMu.Lock()
 		delete(leases, leaseKey)
 		if len(promLabels) >= 2 {
 			LeasesInUse.With(promLabels).Dec()
 		}
 		reconcilePoolStates()
-		poolsMu.Unlock()
 		l.triggerPoolUpdates(ctx)
 		return ctrl.Result{}, nil
 	}
 
-	poolsMu.Lock()
 	leases[leaseKey] = lease
-	poolsMu.Unlock()
 
 	if lease.Status.Phase == v1.PHASE_FULFILLED {
 		log.Print("lease is already fulfilled")
@@ -353,7 +347,6 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	var network *v1.Network
 
 	if !utils.DoesLeaseHaveNetworks(lease) {
-		poolsMu.Lock()
 		var availableNetworks []*v1.Network
 		network, err = l.getCommonNetworkForLease(lease)
 		if err != nil {
@@ -373,8 +366,6 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		} else {
 			availableNetworks = []*v1.Network{network}
 		}
-
-		poolsMu.Unlock()
 
 		log.Printf("available networks: %d - lease %s requested networks: %d", len(availableNetworks), lease.Name, lease.Spec.Networks)
 		if len(availableNetworks) < lease.Spec.Networks {
