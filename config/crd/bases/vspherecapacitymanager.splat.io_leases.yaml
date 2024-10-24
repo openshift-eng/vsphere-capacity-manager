@@ -66,6 +66,7 @@ spec:
                 - disconnected
                 - single-tenant
                 - multi-tenant
+                - nested-multi-tenant
                 type: string
               networks:
                 description: Networks is the number of networks requested

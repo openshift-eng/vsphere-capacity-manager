@@ -207,6 +207,17 @@ status: {}
 
 See https://github.com/openshift-splat-team/vsphere-capacity-manager/blob/main/pkg/apis/vspherecapacitymanager.splat.io/v1/network_types.go for a  comprehensive description of fields, labels, and annotations.
 
+### Network Types
+
+By default, networks are deemed to be single tenant. `single-tenant` networks do not share their VLAN with any other jobs or clusters.
+Some jobs require sole use of the VLAN they back and as such are single tenant. 
+
+`multi-tenant` networks are networks which are shared with other clusters and jobs. It is possible(and likely) that multiple clusters will be on the same VLAN concurrently. Jobs are opted in if 
+they can safely run alongside other jobs in the same VLAN.
+
+`nested-multi-tenant` networks are configured with MAC address learning enabled. This is required for ESXi hosts to get an IP address.
+Aside from this, they are identical to `multi-tenant` networks.
+
 ## Leases
 
 __NOTE: Generally, jobs won't need to introspect leases since `platform.json` and `platform.yaml` already condense the content of lease(s) in to a format that is required for a successful installation.__
