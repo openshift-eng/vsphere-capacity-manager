@@ -58,7 +58,7 @@ type LeaseSpec struct {
 	// are only used by one CI jobs.  multi-tenant networks reside on a
 	// VLAN which may be used by multiple jobs.  disconnected networks aren't yet
 	// supported.
-	// +kubebuilder:validation:Enum="";disconnected;single-tenant;multi-tenant
+	// +kubebuilder:validation:Enum="";disconnected;single-tenant;multi-tenant;nested-multi-tenant
 	// +kubebuilder:default=single-tenant
 	// +optional
 	NetworkType NetworkType `json:"network-type"`
