@@ -215,8 +215,11 @@ Some jobs require sole use of the VLAN they back and as such are single tenant.
 `multi-tenant` networks are networks which are shared with other clusters and jobs. It is possible(and likely) that multiple clusters will be on the same VLAN concurrently. Jobs are opted in if 
 they can safely run alongside other jobs in the same VLAN.
 
-`nested-multi-tenant` networks are configured with MAC address learning enabled. This is required for ESXi hosts to get an IP address.
+`nested-multi-tenant` networks are configured with MAC address learning enabled and Forge transmits are set to accept. This is required for ESXi hosts to get an IP address.
 Aside from this, they are identical to `multi-tenant` networks.
+
+`public-ipv6` networks are configured for single-stack IPv6. __Note: This network type is only available in pool
+`vcenter-1.devqe.ibmc.devcluster.openshift.com-devqedatacenter-1-devqecluster-1`__.
 
 ## Leases
 

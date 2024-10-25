@@ -67,6 +67,7 @@ spec:
                 - single-tenant
                 - multi-tenant
                 - nested-multi-tenant
+                - public-ipv6
                 type: string
               networks:
                 description: Networks is the number of networks requested
