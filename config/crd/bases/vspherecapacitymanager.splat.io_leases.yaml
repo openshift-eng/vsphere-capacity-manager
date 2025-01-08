@@ -116,6 +116,13 @@ spec:
                 maxLength: 255
                 minLength: 1
                 type: string
+              shortName:
+                description: ShortName a short name to be used by CI and other services
+                  that need to limit max length of failure domain name
+                maxLength: 30
+                minLength: 1
+                pattern: ^[a-zA-Z0-9]([-_a-zA-Z0-9]*[a-zA-Z0-9])?$
+                type: string
               topology:
                 description: Topology describes a given failure domain using vSphere
                   constructs

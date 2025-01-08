@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	generator "github.com/docker/docker/pkg/namesgenerator"
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -81,6 +82,16 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if pool.Finalizers == nil {
 		log.Print("setting finalizer on pool")
 		pool.Finalizers = []string{v1.PoolFinalizer}
+		err := l.Client.Update(ctx, pool)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("error setting pool finalizer: %w", err)
+		}
+	}
+
+	// Set ShortName for pools that do not have it set.  This should only be older configs.
+	if len(pool.Spec.ShortName) == 0 {
+		pool.Spec.ShortName = generator.GetRandomName(0)
+		log.Printf("Setting ShortName for pool %v to %v\n", pool.Name, pool.Spec.ShortName)
 		err := l.Client.Update(ctx, pool)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("error setting pool finalizer: %w", err)
