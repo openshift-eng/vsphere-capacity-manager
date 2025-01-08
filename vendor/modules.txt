@@ -96,6 +96,9 @@ github.com/davecgh/go-spew/spew
 # github.com/denis-tingaikin/go-header v0.4.3
 ## explicit; go 1.17
 github.com/denis-tingaikin/go-header
+# github.com/docker/docker v27.4.1+incompatible
+## explicit
+github.com/docker/docker/pkg/namesgenerator
 # github.com/emicklei/go-restful/v3 v3.11.0
 ## explicit; go 1.13
 github.com/emicklei/go-restful/v3
