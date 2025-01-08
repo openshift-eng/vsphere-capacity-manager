@@ -69,8 +69,8 @@ func GetPoolWithStrategy(lease *v1.Lease, pools []*v1.Pool, strategy v1.Allocati
 			Name:       pool.Name,
 			UID:        pool.UID,
 		})
-		pool.Spec.VSpherePlatformFailureDomainSpec.DeepCopyInto(
-			&lease.Status.VSpherePlatformFailureDomainSpec)
+		pool.Spec.FailureDomainSpec.DeepCopyInto(
+			&lease.Status.FailureDomainSpec)
 
 		// drop the networks from the topology. networks will be assigned in a later step.
 		lease.Status.Topology.Networks = []string{}

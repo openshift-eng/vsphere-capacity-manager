@@ -2,8 +2,6 @@ package v1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	configv1 "github.com/openshift/api/config/v1"
 )
 
 const (
@@ -43,7 +41,7 @@ type IBMPoolSpec struct {
 
 // PoolSpec defines the specification for a pool
 type PoolSpec struct {
-	configv1.VSpherePlatformFailureDomainSpec `json:",inline"`
+	FailureDomainSpec `json:",inline"`
 	// IBMPoolSpec topology information associated with this pool
 	IBMPoolSpec IBMPoolSpec `json:"ibmPoolSpec,omitempty"`
 	// VCpus is the number of virtual CPUs

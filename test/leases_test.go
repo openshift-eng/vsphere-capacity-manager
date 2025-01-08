@@ -183,6 +183,9 @@ var _ = Describe("Lease management", func() {
 					return result
 				}).Should(BeTrue())
 			})
+			By("lease should have a short name", func() {
+				Expect(len((&leases.Items[0]).Status.ShortName)).ToNot(Equal(0))
+			})
 		})
 	})
 
@@ -222,6 +225,7 @@ var _ = Describe("Lease management", func() {
 					}
 
 					for _, lease := range leases.Items {
+						Expect(len(lease.Status.ShortName)).ToNot(Equal(0))
 						result, _ := IsLeaseOwnedByKinds(&lease, "Network", "Pool")
 						if result == false {
 							return false
@@ -229,6 +233,11 @@ var _ = Describe("Lease management", func() {
 					}
 					return true
 				}).Should(BeTrue())
+			})
+			By("lease should have a short name", func() {
+				for _, lease := range leases.Items {
+					Expect(len(lease.Status.ShortName)).ToNot(Equal(0))
+				}
 			})
 		})
 	})
@@ -294,6 +303,9 @@ var _ = Describe("Lease management", func() {
 					return result
 				}).Should(BeTrue())
 			})
+			By("lease should have a short name", func() {
+				Expect(len(lease.Status.ShortName)).ToNot(Equal(0))
+			})
 		})
 
 		By("deleting the lease", func() {
@@ -355,6 +367,11 @@ var _ = Describe("Lease management", func() {
 
 				}).Should(BeTrue())
 			})
+			By("lease should have a short name", func() {
+				for _, lease := range leases {
+					Expect(len(lease.Status.ShortName)).ToNot(Equal(0))
+				}
+			})
 		})
 
 		By("deleting the leases", func() {
@@ -396,6 +413,9 @@ var _ = Describe("Lease management", func() {
 					result, _ := IsLeaseOwnedByKinds(lease, "Pool", "Network")
 					return result
 				}).Should(BeTrue())
+			})
+			By("lease should have a short name", func() {
+				Expect(len(lease.Status.ShortName)).ToNot(Equal(0))
 			})
 		})
 
@@ -461,6 +481,11 @@ var _ = Describe("Lease management", func() {
 				lease2Network := lease2.Status.Topology.Networks[0][strings.LastIndex(lease2.Status.Topology.Networks[0], "/"):]
 
 				Expect(lease1Network).To(Equal(lease2Network))
+			})
+			By("lease should have a short name", func() {
+				for _, lease := range leases.Items {
+					Expect(len(lease.Status.ShortName)).ToNot(Equal(0))
+				}
 			})
 		})
 

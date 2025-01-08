@@ -260,6 +260,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		lease.Status.Zone = "pending"
 		lease.Status.Region = "pending"
 		lease.Status.Name = "pending"
+		lease.Status.ShortName = "pending"
 		lease.Status.Topology.Networks = append(lease.Status.Topology.Networks, "/pending/network/pending")
 		if err := l.Status().Update(ctx, lease); err != nil {
 			return ctrl.Result{}, fmt.Errorf("unable to set the initial status on the lease %s: %w", lease.Name, err)

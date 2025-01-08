@@ -12,6 +12,7 @@ spec:
   name: test-2.com-IBMCloud-vcs-ci-workload
   region: us-central
   server: test-2.com
+  shortName: pool-2-ibmcloud
   storage: 0
   topology:
     computeCluster: /cidatacenter-2/host/vcs-ci-workload
