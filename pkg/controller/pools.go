@@ -94,7 +94,7 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		log.Printf("Setting ShortName for pool %v to %v\n", pool.Name, pool.Spec.ShortName)
 		err := l.Client.Update(ctx, pool)
 		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("error setting pool finalizer: %w", err)
+			return ctrl.Result{}, fmt.Errorf("error setting pool short name: %w", err)
 		}
 	}
 
