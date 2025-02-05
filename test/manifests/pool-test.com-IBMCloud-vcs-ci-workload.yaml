@@ -50,6 +50,7 @@ spec:
     - /IBMCloud/network/ci-vlan-1148
     - /IBMCloud/network/ci-vlan-956
   vcpus: 240
+  overCommitRatio: "2.5"
   zone: us-east-4a
 status:
   datastore-available: 0
