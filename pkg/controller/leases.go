@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"path"
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -155,7 +156,14 @@ func reconcilePoolStates() []*v1.Pool {
 				}
 			}
 		}
-		pool.Status.VCpusAvailable = pool.Spec.VCpus - vcpus
+
+		overCommitRatio, err := strconv.ParseFloat(pool.Spec.OverCommitRatio, 32)
+		if err != nil {
+			log.Printf("error converting overCommitRatio to float %v setting to 1.0", err)
+			overCommitRatio = 1.0
+		}
+
+		pool.Status.VCpusAvailable = int(float64(pool.Spec.VCpus)*overCommitRatio) - vcpus
 		pool.Status.MemoryAvailable = pool.Spec.Memory - memory
 
 		pools[poolName] = pool
