@@ -85,6 +85,9 @@ spec:
                   be allocated. any in progress leases will remain active until they
                   are destroyed.
                 type: boolean
+              overCommitRatio:
+                default: "1.0"
+                type: string
               region:
                 description: region defines the name of a region tag that will be
                   attached to a vCenter datacenter. The tag category in vCenter must
@@ -193,6 +196,7 @@ spec:
             - exclude
             - memory
             - name
+            - overCommitRatio
             - region
             - server
             - storage

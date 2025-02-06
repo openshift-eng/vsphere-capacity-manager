@@ -46,6 +46,8 @@ type PoolSpec struct {
 	IBMPoolSpec IBMPoolSpec `json:"ibmPoolSpec,omitempty"`
 	// VCpus is the number of virtual CPUs
 	VCpus int `json:"vcpus"`
+	// +kubebuilder:default="1.0"
+	OverCommitRatio string `json:"overCommitRatio"`
 	// Memory is the amount of memory in GB
 	Memory int `json:"memory"`
 	// Storage is the amount of storage in GB
