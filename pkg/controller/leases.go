@@ -230,6 +230,8 @@ func (l *LeaseReconciler) getCommonNetworksForLease(lease *v1.Lease) ([]*v1.Netw
 			continue
 		} else if thisLeaseID != leaseID {
 			continue
+		} else if lease.Status.Phase != v1.PHASE_PENDING {
+			continue
 		}
 
 		var foundNetworks []*v1.Network
@@ -251,6 +253,39 @@ func (l *LeaseReconciler) getCommonNetworksForLease(lease *v1.Lease) ([]*v1.Netw
 		}
 	}
 	return nil, fmt.Errorf("no common network found for %s", lease.Name)
+}
+
+// shouldLeaseBeDelayed is used to determine if current lease should be delayed.
+func shouldLeaseBeDelayed(lease *v1.Lease) bool {
+	// Iterate through all leases.  Ignore fulfilled.  If we see Partial, no need to block.  If Pending, we can only run
+	// if there are no other partials that are interested in the same pools as current lease.  If there are no partials,
+	// then we need to make sure we have no other leases that are older.  Oldest should go first.
+	if lease.Status.Phase == v1.PHASE_PENDING {
+		for _, curLease := range leases {
+
+			// skip if lease is the target lease
+			if curLease.Name == lease.Name {
+				continue
+			}
+
+			switch curLease.Status.Phase {
+			case v1.PHASE_FULFILLED:
+				continue
+			case v1.PHASE_PARTIAL:
+				log.Printf("Delaying lease %v", lease.Name)
+				return true
+			case v1.PHASE_PENDING:
+				// TODO: We should add a check here to also verify what pool the current pending lease is part of.
+				leaseTime := curLease.CreationTimestamp
+				if leaseTime.Time.Before(lease.CreationTimestamp.Time) {
+					return true
+				}
+			default:
+				log.Printf("unknown lease phase %s", curLease.Status.Phase)
+			}
+		}
+	}
+	return false
 }
 
 func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -340,7 +375,18 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	updatedPools := reconcilePoolStates()
 
-	lease.Status.Phase = v1.PHASE_PENDING
+	if len(lease.Status.Phase) == 0 {
+		lease.Status.Phase = v1.PHASE_PENDING
+	} else {
+		log.Printf("processing lease %v with Phase %v", lease.Name, lease.Status.Phase)
+	}
+
+	// We need to check to see if any other leases are waiting for resources that this lease may want.  We need to
+	// ensure that older leases get to finish getting their requests fulfilled before their Ci jobs timeout.
+	if shouldLeaseBeDelayed(lease) {
+		log.Printf("=========== lease %v is being delayed due to presence of higher priority leases ===========", lease.Name)
+		return ctrl.Result{}, fmt.Errorf("lease %v is being delayed", lease.Name)
+	}
 
 	pool := &v1.Pool{}
 	if ref := utils.DoesLeaseHavePool(lease); ref == nil {
@@ -365,6 +411,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	var network *v1.Network
 
 	if !utils.DoesLeaseHaveNetworks(lease) {
+		log.Printf("Searching for networks to assign to lease %v", lease.Name)
 		var availableNetworks []*v1.Network
 		availableNetworks, err = l.getCommonNetworksForLease(lease)
 		if err != nil {
@@ -379,20 +426,27 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			if lease.Spec.NetworkType == v1.NetworkTypeMultiTenant {
 				// for mutli-tenant leases, there is no reason they can't fall back to single-tenant if there aren't
 				// any multi-tenant leases available.
+				log.Println("Adding single tenant to multi tenant collection...")
 				availableNetworks = append(availableNetworks, l.getAvailableNetworks(pool, v1.NetworkTypeSingleTenant)...)
 			}
 		} else {
 			log.Printf("getCommonNetworkForLease for lease %v returned %d leases", lease.Name, len(availableNetworks))
 		}
 
-		log.Printf("available networks: %d - lease %s requested networks: %d", len(availableNetworks), lease.Name, lease.Spec.Networks)
-		if len(availableNetworks) < lease.Spec.Networks {
-			lease.OwnerReferences = nil
+		log.Printf("available networks: %d - lease %s requested %d networks and current has %d assigned", len(availableNetworks), lease.Name, lease.Spec.Networks, len(lease.Status.Topology.Networks))
+
+		// If we do not have enough networks, lets assign the ones we do have and assign additional when they become available to prevent starvation.
+		if len(availableNetworks) == 0 {
 			return ctrl.Result{}, fmt.Errorf("lease requires %d networks, %d networks available", lease.Spec.Networks, len(availableNetworks))
 		}
 
+		// Set networks to equal current ones in status
 		var networks []string
-		for idx := 0; idx < lease.Spec.Networks; idx++ {
+		if len(lease.Status.Topology.Networks) != 0 && lease.Status.Topology.Networks[0] != "/pending/network/pending" {
+			networks = lease.Status.Topology.Networks
+		}
+
+		for idx := 0; idx+len(lease.Status.Topology.Networks) < lease.Spec.Networks && idx < len(availableNetworks); idx++ {
 			network = availableNetworks[idx]
 			lease.OwnerReferences = append(lease.OwnerReferences, metav1.OwnerReference{
 				APIVersion: network.APIVersion,
@@ -402,15 +456,27 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			})
 			networks = append(networks, fmt.Sprintf("/%s/network/%s", lease.Status.Topology.Datacenter, network.Spec.PortGroupName))
 		}
-		if len(networks) > 1 {
-			log.Printf("%s requested more than one network", lease.Name)
+		if len(networks) != lease.Spec.Networks {
+			log.Printf("%s requested more than one network, but only %d have been assigned", lease.Name, len(networks))
 		}
 		lease.Status.Topology.Networks = networks
 	}
 
-	err = utils.GenerateEnvVars(lease, pool, network)
-	if err != nil {
-		log.Printf("error generating env vars: %v", err)
+	// This is currently setting last network as env.  I believe it shouldn't matter, but may want to use the first one.
+	if network != nil {
+		log.Printf("Generating env vars for lease %v with pool %v and network %v", lease.Name, pool.Name, network.Name)
+		err = utils.GenerateEnvVars(lease, pool, network)
+		if err != nil {
+			log.Printf("error generating env vars: %v", err)
+		}
+	}
+
+	// If all networks have been assigned, lets mark lease as Fulfilled, else the phase will be partial
+	log.Printf("Lease %v has %d networks assigned: %v", lease.Name, len(lease.Status.Topology.Networks), lease.Status.Topology.Networks)
+	if len(lease.Status.Topology.Networks) == lease.Spec.Networks {
+		lease.Status.Phase = v1.PHASE_FULFILLED
+	} else {
+		lease.Status.Phase = v1.PHASE_PARTIAL
 	}
 
 	leaseStatus := lease.Status.DeepCopy()
@@ -420,20 +486,22 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	leaseStatus.DeepCopyInto(&lease.Status)
-	lease.Status.Phase = v1.PHASE_FULFILLED
+
 	err = l.Client.Status().Update(ctx, lease)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("error updating lease, requeuing: %v", err)
 	}
 
-	promLabels["pool"] = pool.Name
-	LeasesInUse.With(promLabels).Add(1)
+	if lease.Status.Phase == v1.PHASE_FULFILLED {
+		promLabels["pool"] = pool.Name
+		LeasesInUse.With(promLabels).Add(1)
 
-	if pool.Annotations == nil {
-		pool.Annotations = make(map[string]string)
+		if pool.Annotations == nil {
+			pool.Annotations = make(map[string]string)
+		}
+
+		l.triggerPoolUpdates(ctx)
 	}
-
-	l.triggerPoolUpdates(ctx)
 
 	return ctrl.Result{}, nil
 }
