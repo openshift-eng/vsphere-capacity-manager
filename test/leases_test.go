@@ -108,6 +108,14 @@ var _ = Describe("Lease management", func() {
 			if len(knownPools.Items) != len(pools.Items) {
 				return fmt.Errorf("pools not loaded")
 			}
+
+			// Check to see if initialized
+			for _, pool := range knownPools.Items {
+				if !pool.Status.Initialized {
+					return fmt.Errorf("pool not initialized")
+				}
+			}
+
 			return nil
 		}).Should(Succeed())
 
@@ -122,6 +130,28 @@ var _ = Describe("Lease management", func() {
 
 			}).Should(BeTrue())
 		}
+
+		By("Waiting for networks to enumerate")
+		Eventually(func() error {
+			knownNetworks := &v1.NetworkList{}
+			err = k8sClient.List(ctx, knownNetworks)
+			if err != nil {
+				return err
+			}
+
+			if len(knownNetworks.Items) != len(networks.Items) {
+				return fmt.Errorf("network not loaded")
+			}
+
+			// Check to see if initialized
+			for _, network := range knownNetworks.Items {
+				if len(network.Finalizers) == 0 {
+					return fmt.Errorf("network not initialized")
+				}
+			}
+
+			return nil
+		}).Should(Succeed())
 
 	}, OncePerOrdered)
 
@@ -497,6 +527,52 @@ var _ = Describe("Lease management", func() {
 			By("waiting for the lease to be deleted", func() {
 				Eventually(func() bool {
 					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1) != nil
+				}).Should(BeTrue())
+			})
+		})
+	})
+
+	// This test is to verify a fix for issue with private ci jobs that were requesting multi zone with multi
+	It("should acquire multiple networks for case with multi zone", func() {
+		var lease1, lease2 *v1.Lease
+
+		// Create a lease to take all but few of the pool.
+		By("creating a resource lease", func() {
+			lease1 = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-1").WithBoskosID("vsphere-elastic-88").Build()
+			Expect(lease1).NotTo(BeNil())
+			lease1.Spec.Networks = 2
+
+			lease2 = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-2").WithBoskosID("vsphere-elastic-88").Build()
+			Expect(lease2).NotTo(BeNil())
+			lease2.Spec.Networks = 2
+
+			Expect(k8sClient.Create(ctx, lease1)).To(Succeed())
+			Expect(k8sClient.Create(ctx, lease2)).To(Succeed())
+		})
+
+		// Wait for the start lease to be fulfilled
+		By("waiting for leases to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1)
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease2), lease2)
+
+				return lease1.Status.Phase == v1.PHASE_FULFILLED && lease2.Status.Phase == v1.PHASE_FULFILLED
+			}).Should(BeTrue())
+		})
+
+		// Now delete the leases
+		By("deleting the leases", func() {
+			By("by deleting the resource lease", func() {
+				Expect(k8sClient.Delete(ctx, lease1)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, lease2)).To(Succeed())
+			})
+			By("waiting for the lease to be deleted", func() {
+				Eventually(func() bool {
+					if k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1) == nil {
+						return false
+					}
+
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease2), lease2) != nil
 				}).Should(BeTrue())
 			})
 		})
