@@ -207,9 +207,9 @@ func (l *LeaseReconciler) triggerPoolUpdates(ctx context.Context) {
 	}
 }
 
-// returns a common portgroup that satisfies all known leases for this job. common port groups are scoped
+// returns common portgroups that satisfies all known leases for this job. common port groups are scoped
 // to a single vCenter. for multiple vCenters, a network lease for each vCenter will be claimed.
-func (l *LeaseReconciler) getCommonNetworkForLease(lease *v1.Lease) (*v1.Network, error) {
+func (l *LeaseReconciler) getCommonNetworksForLease(lease *v1.Lease) ([]*v1.Network, error) {
 	var exists bool
 	var leaseID string
 
@@ -225,20 +225,29 @@ func (l *LeaseReconciler) getCommonNetworkForLease(lease *v1.Lease) (*v1.Network
 			// this is a network-only lease. do not consider it.
 			continue
 		}
+
 		if thisLeaseID, exists := _lease.Labels[BoskosIdLabel]; !exists {
 			continue
 		} else if thisLeaseID != leaseID {
 			continue
 		}
+
+		var foundNetworks []*v1.Network
 		for _, ownerRef := range _lease.OwnerReferences {
 			if ownerRef.Kind != "Network" {
 				continue
 			}
+
+			// If the lease is requiring more than one, we need to return all that fulfill the request.  Multi nic
+			// fails here if the network count is 2 and we return 1.
 			for _, network := range networks {
 				if network.Name == ownerRef.Name && network.UID == ownerRef.UID {
-					return network, nil
+					foundNetworks = append(foundNetworks, network)
 				}
 			}
+		}
+		if len(foundNetworks) > 0 {
+			return foundNetworks, nil
 		}
 	}
 	return nil, fmt.Errorf("no common network found for %s", lease.Name)
@@ -357,7 +366,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if !utils.DoesLeaseHaveNetworks(lease) {
 		var availableNetworks []*v1.Network
-		network, err = l.getCommonNetworkForLease(lease)
+		availableNetworks, err = l.getCommonNetworksForLease(lease)
 		if err != nil {
 			log.Printf("error getting common network for lease, will attempt to allocate a new one: %v", err)
 
@@ -373,7 +382,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				availableNetworks = append(availableNetworks, l.getAvailableNetworks(pool, v1.NetworkTypeSingleTenant)...)
 			}
 		} else {
-			availableNetworks = []*v1.Network{network}
+			log.Printf("getCommonNetworkForLease for lease %v returned %d leases", lease.Name, len(availableNetworks))
 		}
 
 		log.Printf("available networks: %d - lease %s requested networks: %d", len(availableNetworks), lease.Name, lease.Spec.Networks)
