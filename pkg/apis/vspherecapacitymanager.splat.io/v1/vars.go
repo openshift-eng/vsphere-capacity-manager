@@ -5,6 +5,7 @@ const (
 	RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED = AllocationStrategy("under-utilized")
 
 	PHASE_FULFILLED Phase = "Fulfilled"
+	PHASE_PARTIAL   Phase = "Partial"
 	PHASE_PENDING   Phase = "Pending"
 	PHASE_FAILED    Phase = "Failed"
 )
