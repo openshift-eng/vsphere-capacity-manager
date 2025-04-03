@@ -48,7 +48,16 @@ spec:
     - /IBMCloud/network/ci-vlan-1207
     - /IBMCloud/network/ci-vlan-1197
     - /IBMCloud/network/ci-vlan-1148
+    - /IBMCloud/network/ci-vlan-958
+    - /IBMCloud/network/ci-vlan-958-1
+    - /IBMCloud/network/ci-vlan-958-2
+    - /IBMCloud/network/ci-vlan-958-3
     - /IBMCloud/network/ci-vlan-956
+    - /IBMCloud/network/ci-vlan-938
+    - /IBMCloud/network/ci-vlan-938-1
+    - /IBMCloud/network/ci-vlan-938-2
+    - /IBMCloud/network/ci-vlan-938-3
+
   vcpus: 240
   overCommitRatio: "2.5"
   zone: us-east-4a

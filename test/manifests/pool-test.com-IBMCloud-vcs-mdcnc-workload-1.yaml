@@ -50,6 +50,10 @@ spec:
     - /IBMCloud/network/ci-vlan-1232
     - /IBMCloud/network/ci-vlan-1237
     - /IBMCloud/network/ci-vlan-1259
+    - /IBMCloud/network/ci-vlan-938
+    - /IBMCloud/network/ci-vlan-938-1
+    - /IBMCloud/network/ci-vlan-938-2
+    - /IBMCloud/network/ci-vlan-938-3
   vcpus: 32
   zone: us-east-1a
 status:

@@ -817,14 +817,14 @@ var _ = Describe("Lease management", func() {
 
 		// Now lets create a lease to try to get several networks but should run short
 		By("creating a resource lease that becomes partial", func() {
-			testLease1 = GetLease().WithShape(SHAPE_SMALL).WithBoskosID("vsphere-elastic-88").Build()
+			testLease1 = GetLease().WithShape(SHAPE_SMALL).WithBoskosID("vsphere-elastic-77").WithName("lease-1").Build()
 			Expect(testLease1).NotTo(BeNil())
 
 			testLease1.Spec.Networks = 5
 			Expect(k8sClient.Create(ctx, testLease1)).To(Succeed())
 			time.Sleep(time.Second * 1)
 
-			testLease2 = GetLease().WithShape(SHAPE_SMALL).WithBoskosID("vsphere-elastic-88").Build()
+			testLease2 = GetLease().WithShape(SHAPE_SMALL).WithBoskosID("vsphere-elastic-88").WithName("lease-2").Build()
 			Expect(testLease2).NotTo(BeNil())
 
 			testLease2.Spec.Networks = 5
@@ -858,8 +858,6 @@ var _ = Describe("Lease management", func() {
 			Eventually(func() bool {
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(testLease1), testLease1)
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(testLease2), testLease2)
-				log.Printf("lease %v(1) timestamp %v, lease %v (2) timestamp %v", testLease1.Name, testLease1.CreationTimestamp, testLease2.Name, testLease2.CreationTimestamp)
-				log.Printf("lease 1 is %v and lease 2 is %v", testLease1.Status.Phase, testLease2.Status.Phase)
 				return testLease1.Status.Phase == v1.PHASE_FULFILLED && testLease2.Status.Phase != v1.PHASE_FULFILLED
 			}).Should(BeTrue())
 		})
@@ -889,8 +887,6 @@ var _ = Describe("Lease management", func() {
 			Eventually(func() bool {
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(testLease1), testLease1)
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(testLease2), testLease2)
-				log.Printf("lease %v(1) timestamp %v, lease %v (2) timestamp %v", testLease1.Name, testLease1.CreationTimestamp, testLease2.Name, testLease2.CreationTimestamp)
-				log.Printf("lease 1 is %v and lease 2 is %v", testLease1.Status.Phase, testLease2.Status.Phase)
 				return testLease1.Status.Phase == v1.PHASE_FULFILLED && testLease2.Status.Phase == v1.PHASE_FULFILLED
 			}).Should(BeTrue())
 		})
@@ -959,6 +955,56 @@ var _ = Describe("Lease management", func() {
 					}
 
 					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease2), lease2) != nil
+				}).Should(BeTrue())
+			})
+		})
+	})
+
+	// This test is to verify a fix for issue with private ci jobs that were requesting multi zone with multi
+	It("should not acquire multiple networks from same multi-tenant portgroup", func() {
+		var fillerLease, lease1 *v1.Lease
+
+		// Create a lease to take all but few of the pool.
+		By("creating a filler lease to take all single tenant networks", func() {
+			fillerLease = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-1").WithBoskosID("vsphere-elastic-11").Build()
+			Expect(fillerLease).NotTo(BeNil())
+			fillerLease.Spec.Networks = 32
+			Expect(k8sClient.Create(ctx, fillerLease)).To(Succeed())
+		})
+
+		// Wait for the start lease to be fulfilled
+		By("waiting for filler lease to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(fillerLease), fillerLease)
+				return fillerLease.Status.Phase == v1.PHASE_FULFILLED
+			}).Should(BeTrue())
+		})
+
+		// Create a lease to take all but few of the pool.
+		By("creating a resource lease", func() {
+			lease1 = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-1").WithBoskosID("vsphere-elastic-88").Build()
+			Expect(lease1).NotTo(BeNil())
+			lease1.Spec.Networks = 2
+			lease1.Spec.NetworkType = v1.NetworkTypeMultiTenant
+			Expect(k8sClient.Create(ctx, lease1)).To(Succeed())
+		})
+
+		// Wait for the start lease to be fulfilled
+		By("waiting for lease to be partial", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1)
+				return lease1.Status.Phase == v1.PHASE_PARTIAL
+			}).Should(BeTrue())
+		})
+
+		// Now delete the leases
+		By("deleting the leases", func() {
+			By("by deleting the resource lease", func() {
+				Expect(k8sClient.Delete(ctx, lease1)).To(Succeed())
+			})
+			By("waiting for the lease to be deleted", func() {
+				Eventually(func() bool {
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1) != nil
 				}).Should(BeTrue())
 			})
 		})
