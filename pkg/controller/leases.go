@@ -64,10 +64,9 @@ func (l *LeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return nil
 }
 
-// getAvailableNetworks retrieves networks which are not owned by a lease
-func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool, networkType v1.NetworkType) []*v1.Network {
+// getNetworksForPool get all networks for the provided pool.
+func getNetworksForPool(pool *v1.Pool) map[string]*v1.Network {
 	networksInPool := make(map[string]*v1.Network)
-	availableNetworks := make([]*v1.Network, 0)
 	for _, portGroupPath := range pool.Spec.Topology.Networks {
 		_, networkName := path.Split(portGroupPath)
 
@@ -79,6 +78,13 @@ func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool, networkType v1.Net
 			}
 		}
 	}
+	return networksInPool
+}
+
+// getAvailableNetworks retrieves networks which are not owned by a lease
+func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool, networkType v1.NetworkType) []*v1.Network {
+	networksInPool := getNetworksForPool(pool)
+	availableNetworks := make([]*v1.Network, 0)
 
 	for _, network := range networksInPool {
 		hasOwner := false
@@ -257,9 +263,9 @@ func (l *LeaseReconciler) getCommonNetworksForLease(lease *v1.Lease) ([]*v1.Netw
 
 // shouldLeaseBeDelayed is used to determine if current lease should be delayed.
 func shouldLeaseBeDelayed(lease *v1.Lease) bool {
-	// Iterate through all leases.  Ignore fulfilled.  If we see Partial, no need to block.  If Pending, we can only run
-	// if there are no other partials that are interested in the same pools as current lease.  If there are no partials,
-	// then we need to make sure we have no other leases that are older.  Oldest should go first.
+	// Iterate through all leases.  Ignore fulfilled.  If we see Partial, block if needing same pool.  If Pending, we
+	// can only run if there are no other partials that are interested in the same pools as current lease.  If there are
+	// no partials, then we need to make sure we have no other leases that are older.  Oldest should go first.
 	if lease.Status.Phase == v1.PHASE_PENDING {
 		for _, curLease := range leases {
 
@@ -268,23 +274,54 @@ func shouldLeaseBeDelayed(lease *v1.Lease) bool {
 				continue
 			}
 
+			// If lease is multi network and required pool is blank, then we want to make sure the current assigned pool
+			// is checked instead of desired pool.
+			requiredPool := curLease.Spec.RequiredPool
+			if curLease.Spec.Networks > 1 && requiredPool == "" {
+				requiredPool = curLease.Status.Name
+			}
+
+			log.Printf("lease %v pool '%v', current lease %v (%v) pool '%v'", lease.Name, lease.Spec.RequiredPool, curLease.Name, curLease.Status.Phase, requiredPool)
+
 			switch curLease.Status.Phase {
 			case v1.PHASE_FULFILLED:
 				continue
 			case v1.PHASE_PARTIAL:
-				log.Printf("Delaying lease %v", lease.Name)
-				return true
-			case v1.PHASE_PENDING:
-				// TODO: We should add a check here to also verify what pool the current pending lease is part of.
-				leaseTime := curLease.CreationTimestamp
-				if leaseTime.Time.Before(lease.CreationTimestamp.Time) {
+				// We want partial to prevent others wanting same pool.
+				if requiredPool == lease.Spec.RequiredPool || lease.Spec.RequiredPool == "" {
 					return true
+				}
+			case v1.PHASE_PENDING:
+				// If leases are both from the same pool, give priority to oldest.  If either of them are blank for the
+				// desired pool, they could be assigned to the same pool depending on availability.  So in this case,
+				// compare them as well.
+				if requiredPool == lease.Spec.RequiredPool || requiredPool == "" || lease.Spec.RequiredPool == "" {
+					leaseTime := curLease.CreationTimestamp
+					if leaseTime.Time.Before(lease.CreationTimestamp.Time) {
+						return true
+					}
 				}
 			default:
 				log.Printf("unknown lease phase %s", curLease.Status.Phase)
 			}
 		}
 	}
+	return false
+}
+
+// doesLeaseContainPortGroup checks to see if the supplied network is part of a portgroup that is already assigned to the lease.
+func doesLeaseContainPortGroup(lease *v1.Lease, pool *v1.Pool, network *v1.Network) bool {
+	poolNetworks := getNetworksForPool(pool)
+
+	for _, owner := range lease.OwnerReferences {
+		if owner.Kind == "Network" {
+			if poolNetworks[owner.Name].Spec.VlanId == network.Spec.VlanId &&
+				*poolNetworks[owner.Name].Spec.DatacenterName == *network.Spec.DatacenterName {
+				return true
+			}
+		}
+	}
+
 	return false
 }
 
@@ -447,14 +484,16 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 
 		for idx := 0; idx+len(lease.Status.Topology.Networks) < lease.Spec.Networks && idx < len(availableNetworks); idx++ {
-			network = availableNetworks[idx]
-			lease.OwnerReferences = append(lease.OwnerReferences, metav1.OwnerReference{
-				APIVersion: network.APIVersion,
-				Kind:       network.Kind,
-				Name:       network.Name,
-				UID:        network.UID,
-			})
-			networks = append(networks, fmt.Sprintf("/%s/network/%s", lease.Status.Topology.Datacenter, network.Spec.PortGroupName))
+			if !doesLeaseContainPortGroup(lease, pool, availableNetworks[idx]) {
+				network = availableNetworks[idx]
+				lease.OwnerReferences = append(lease.OwnerReferences, metav1.OwnerReference{
+					APIVersion: network.APIVersion,
+					Kind:       network.Kind,
+					Name:       network.Name,
+					UID:        network.UID,
+				})
+				networks = append(networks, fmt.Sprintf("/%s/network/%s", lease.Status.Topology.Datacenter, network.Spec.PortGroupName))
+			}
 		}
 		if len(networks) != lease.Spec.Networks {
 			log.Printf("%s requested more than one network, but only %d have been assigned", lease.Name, len(networks))
