@@ -24,7 +24,8 @@ import (
 )
 
 const (
-	BoskosIdLabel = "boskos-lease-id"
+	BoskosIdLabel             = "boskos-lease-id"
+	ALLOW_MULTI_TO_USE_SINGLE = false
 )
 
 type LeaseReconciler struct {
@@ -44,6 +45,9 @@ type LeaseReconciler struct {
 
 	// ReleaseVersion is the version of current cluster operator release.
 	ReleaseVersion string
+
+	// Option to allow multi-tenant lease to use single-tenant networks
+	AllowMultiToUseSingle bool
 }
 
 func (l *LeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -58,6 +62,7 @@ func (l *LeaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	l.Scheme = mgr.GetScheme()
 	l.Recorder = mgr.GetEventRecorderFor("leases-controller")
 	l.RESTMapper = mgr.GetRESTMapper()
+
 	leases = make(map[string]*v1.Lease)
 	pools = make(map[string]*v1.Pool)
 	networks = make(map[string]*v1.Network)
@@ -274,6 +279,11 @@ func shouldLeaseBeDelayed(lease *v1.Lease) bool {
 				continue
 			}
 
+			// If the lease type does not match, continue
+			if curLease.Spec.NetworkType != lease.Spec.NetworkType {
+				continue
+			}
+
 			// If lease is multi network and required pool is blank, then we want to make sure the current assigned pool
 			// is checked instead of desired pool.
 			requiredPool := curLease.Spec.RequiredPool
@@ -418,6 +428,11 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		log.Printf("processing lease %v with Phase %v", lease.Name, lease.Status.Phase)
 	}
 
+	// Set default network type
+	if len(lease.Spec.NetworkType) == 0 {
+		lease.Spec.NetworkType = v1.NetworkTypeSingleTenant
+	}
+
 	// We need to check to see if any other leases are waiting for resources that this lease may want.  We need to
 	// ensure that older leases get to finish getting their requests fulfilled before their Ci jobs timeout.
 	if shouldLeaseBeDelayed(lease) {
@@ -454,13 +469,10 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if err != nil {
 			log.Printf("error getting common network for lease, will attempt to allocate a new one: %v", err)
 
-			if len(lease.Spec.NetworkType) == 0 {
-				lease.Spec.NetworkType = v1.NetworkTypeSingleTenant
-			}
-
 			availableNetworks = l.getAvailableNetworks(pool, lease.Spec.NetworkType)
 
-			if lease.Spec.NetworkType == v1.NetworkTypeMultiTenant {
+			// We can allow multi-tenant leases to use single-tenant networks if there are not enough multi-tenant leases.
+			if l.AllowMultiToUseSingle && lease.Spec.NetworkType == v1.NetworkTypeMultiTenant {
 				// for mutli-tenant leases, there is no reason they can't fall back to single-tenant if there aren't
 				// any multi-tenant leases available.
 				log.Println("Adding single tenant to multi tenant collection...")

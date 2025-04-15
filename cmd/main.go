@@ -38,7 +38,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.LeaseReconciler{}).
+	if err := (&controller.LeaseReconciler{
+		// This will be set for now via constant, but might be good in future to make configurable via startup parameter.
+		AllowMultiToUseSingle: controller.ALLOW_MULTI_TO_USE_SINGLE,
+	}).
 		SetupWithManager(mgr); err != nil {
 		log.Printf("unable to create controller: %v", err)
 		os.Exit(1)
