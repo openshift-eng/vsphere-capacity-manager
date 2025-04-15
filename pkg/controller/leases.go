@@ -218,6 +218,46 @@ func (l *LeaseReconciler) triggerPoolUpdates(ctx context.Context) {
 	}
 }
 
+func (l *LeaseReconciler) triggerLeaseUpdates(ctx context.Context, networkType v1.NetworkType) {
+	var oldestLease *v1.Lease
+	for _, lease := range leases {
+		// If networkType doesn't match desired, then skip
+		if lease.Spec.NetworkType != networkType {
+			continue
+		}
+
+		// We only want to force an update for leases that are Pending or Partial
+		if lease.Status.Phase == v1.PHASE_FULFILLED {
+			continue
+		}
+
+		err := l.Client.Get(ctx, types.NamespacedName{Name: lease.Name, Namespace: lease.Namespace}, lease)
+		if err != nil {
+			log.Printf("error getting lease %s: %v", lease.Name, err)
+			continue
+		}
+
+		// If lease creation time is older than oldestLease, make current lease the oldestLease
+		if oldestLease == nil || lease.CreationTimestamp.Before(&oldestLease.CreationTimestamp) {
+			oldestLease = lease
+		}
+
+	}
+
+	if oldestLease != nil {
+		if oldestLease.Annotations == nil {
+			oldestLease.Annotations = make(map[string]string)
+		}
+
+		log.Printf("triggering lease update %v", oldestLease.Name)
+		oldestLease.Annotations["last-updated"] = time.Now().Format(time.RFC3339)
+		err := l.Client.Update(ctx, oldestLease)
+		if err != nil {
+			log.Printf("error updating lease %s annotations: %v", oldestLease.Name, err)
+		}
+	}
+}
+
 // returns common portgroups that satisfies all known leases for this job. common port groups are scoped
 // to a single vCenter. for multiple vCenters, a network lease for each vCenter will be claimed.
 func (l *LeaseReconciler) getCommonNetworksForLease(lease *v1.Lease) ([]*v1.Network, error) {
@@ -410,6 +450,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		reconcilePoolStates()
 		l.triggerPoolUpdates(ctx)
+		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
 		return ctrl.Result{}, nil
 	}
 
@@ -437,6 +478,10 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// ensure that older leases get to finish getting their requests fulfilled before their Ci jobs timeout.
 	if shouldLeaseBeDelayed(lease) {
 		log.Printf("=========== lease %v is being delayed due to presence of higher priority leases ===========", lease.Name)
+
+		// Since we are delaying this lease, let's force the oldest lease to be updated to see if it can now be fulfilled.
+		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
+
 		return ctrl.Result{}, fmt.Errorf("lease %v is being delayed", lease.Name)
 	}
 
@@ -552,6 +597,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 
 		l.triggerPoolUpdates(ctx)
+		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
 	}
 
 	return ctrl.Result{}, nil
