@@ -48,10 +48,11 @@ var _ = Describe("Lease management", func() {
 		Expect(err).ToNot(HaveOccurred(), "Manager should be able to be created")
 
 		leaseReconciler := &controller.LeaseReconciler{
-			Client:         mgr.GetClient(),
-			UncachedClient: mgr.GetClient(),
-			Namespace:      namespaceName,
-			OperatorName:   controllerName,
+			Client:                mgr.GetClient(),
+			UncachedClient:        mgr.GetClient(),
+			Namespace:             namespaceName,
+			OperatorName:          controllerName,
+			AllowMultiToUseSingle: false, // TODO: This should be set via each test
 		}
 		Expect(leaseReconciler.SetupWithManager(mgr)).To(Succeed(), "Reconciler should be able to setup with manager")
 
