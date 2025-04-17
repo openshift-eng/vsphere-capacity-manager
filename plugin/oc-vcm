@@ -19,6 +19,19 @@ def getLeases():
     output = run_executable("oc", "get", "leases.vspherecapacitymanager.splat.io", "-n", "vsphere-infra-helpers", "-o", "json")
     return(json.loads(output)['items'])
 
+def getLeasesForPool(poolName):
+    matchingLeases = []
+    leases = getLeases()
+
+    for lease in leases:
+        if "ownerReferences" in lease["metadata"]:
+            for owner in lease["metadata"]["ownerReferences"]:
+                if owner["kind"] == "Pool" and owner["name"] == poolName:
+                    matchingLeases.append(lease)
+                    break
+
+    return matchingLeases
+
 def getNetworks():
     output = run_executable("oc", "get", "networks.vspherecapacitymanager.splat.io", "-n", "vsphere-infra-helpers", "-o", "json")
     return(json.loads(output)['items'])
@@ -116,13 +129,19 @@ def printStatus():
     print("| Pool Name".ljust(nameMaxLen) + "| Avail Capacity".ljust(usageLen) + "| Cordoned".ljust(cordonLen+1) + "| Excluded".ljust(excludedLen+1) + "|")
     print(header)
     header = "+".ljust(nameMaxLen,"-") + "+".ljust(usageLen,"-") + "+".ljust(cordonLen+1, "-") + "+".ljust(excludedLen+1, "-") + "+"    
-    for pool in getPools():        
+    for pool in getPools():
+        # Get number of leases associated with this pool
+        leases = getLeasesForPool(pool["metadata"]["name"])
+
         cpuUsage    = "CPU: " + format((pool["status"]["vcpus-available"] / pool["spec"]["vcpus"]), ".0%")
         memoryUsage = "Memory: " + format((pool["status"]["memory-available"] / pool["spec"]["memory"]), ".0%")
         networkUsage = "Network: " + format(pool["status"]["network-available"] / len(pool["spec"]["topology"]["networks"]), ".0%")
+        leaseCount = "Leases: " + str(len(leases))
+
         print("| " + pool["metadata"]["name"].ljust(nameMaxLen-2) + "| " + cpuUsage.ljust(usageLen-2) + "| " + str(pool["spec"]["noSchedule"]).ljust(cordonLen-1) + "| " + str(pool["spec"]["exclude"]) .ljust(excludedLen-1) + "|")
         print("| ".ljust(nameMaxLen) + "| " + memoryUsage.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
         print("| ".ljust(nameMaxLen) + "| " + networkUsage.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
+        print("| ".ljust(nameMaxLen) + "| " + leaseCount.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
         print(header)        
 
     leaseCount, pendingLeases, singleTenantUsage, multiTenantUsage, singleTenantPending, multiTenantPending, singleTenantPartial, multiTenantPartial = getLeaseStatus()
@@ -218,23 +237,48 @@ def setCapacity(poolName, cpu=None, memory=None):
     applyPool(pool)
     return pool
 
-def listNetworks():
+def listNetworks(networkType):
     nameMaxLen = 0
+    networkInfo = {}
     networks = getNetworks()
+    leases = getLeases()
+
+    # Iterate through each network and determine field data
     for network in networks:
-        nameLen = len(network["metadata"]["name"])
+        leaseCount = 0
+        networkName = network["metadata"]["name"]
+
+        # Calculate max name length for field output
+        nameLen = len(networkName)
         if nameLen > nameMaxLen:
             nameMaxLen = nameLen
+
+        # Search each lease and find any that has owner ref to the network
+        for lease in leases:
+            # Go through each owner ref
+            if "ownerReferences" not in lease["metadata"]:
+                continue
+
+            ownerRefs = lease["metadata"]["ownerReferences"]
+            if ownerRefs != None:
+                for owner in lease["metadata"]["ownerReferences"]:
+                    if owner["kind"] == "Network" and owner["name"] == networkName:
+                        leaseCount += 1
+
+        networkInfo[networkName] = leaseCount
+
     nameMaxLen += 3
-    networkTypeLen = len("Network Type") + 2
+    networkTypeLen = len("nested-multi-tenant") + 2
     cidrLen = 20
+    countLen = len("leases") + 2
     
-    header = "+".ljust(nameMaxLen+2,"-") + "+".ljust(networkTypeLen+2,"-") + "+".ljust(cidrLen+3, "-") + "+"
+    header = "+".ljust(nameMaxLen+2,"-") + "+".ljust(networkTypeLen+2,"-") + "+".ljust(cidrLen+3, "-") + "+".ljust(countLen+3, "-") + "+"
     print(header)
-    print("| Network Name".ljust(nameMaxLen+2) + "| Network Type".ljust(networkTypeLen+2) + "| CIDR".ljust(cidrLen+3) + "|")
+    print("| Network Name".ljust(nameMaxLen+2) + "| Network Type".ljust(networkTypeLen+2) + "| CIDR".ljust(cidrLen+3) + "| Leases".ljust(countLen+3) + "|")
     print(header)
     for network in networks:
-        print("| " + network["metadata"]["name"].ljust(nameMaxLen) + "| " + getNetworkType(network).ljust(networkTypeLen) + "| " + network["spec"]["machineNetworkCidr"].ljust(cidrLen+1) + "|")
+        if networkType == None or getNetworkType(network) == networkType:
+            print("| " + network["metadata"]["name"].ljust(nameMaxLen) + "| " + getNetworkType(network).ljust(networkTypeLen) + "| " + network["spec"]["machineNetworkCidr"].ljust(cidrLen+1) + "| " + str(networkInfo[network["metadata"]["name"]]).ljust(countLen+1) + "|")
     print(header)
 
 def splitNetwork(name, networkCount):
@@ -272,6 +316,43 @@ def splitNetwork(name, networkCount):
             json.dump(new_network, file)
         print("applying " + file_name)
         applyManifest(file_name)
+
+def jobs():
+    nameMaxLen = 0
+    leases = getLeases()
+
+    jobs = {}
+    for lease in leases:
+        jobName = "unknown"
+
+        # Some leases do not have job-name set.  These are normally created by bot
+        if "job-name" in lease["metadata"]["labels"]:
+            jobName = lease["metadata"]["labels"]["job-name"]
+
+        if jobName in jobs:
+            job = jobs[jobName]
+            job["count"] += 1
+        else:
+            job = {}
+            job["name"] = jobName
+            job["count"] = 1
+            jobs[jobName] = job
+
+            # Calculate max name length for field output
+            nameLen = len(jobName)
+            if nameLen > nameMaxLen:
+                nameMaxLen = nameLen
+
+    countLen = len("Count")
+
+    header = "+".ljust(nameMaxLen+3,"-") + "+".ljust(countLen+3,"-") + "+"
+    print(header)
+    print("| Job Name".ljust(nameMaxLen+3) + "| Count".ljust(countLen+3) + "|")
+    print(header)
+    for jobName in jobs:
+        job = jobs[jobName]
+        print("| " + job["name"].ljust(nameMaxLen) + " | " + str(job["count"]).ljust(countLen) + " |")
+    print(header)
 
 def main():
     parser = argparse.ArgumentParser(description="Process some commands.")
@@ -313,12 +394,14 @@ def main():
 
     parser_status = subparsers.add_parser("status", help="Get status of the capacity manager")
 
-
     parser_networks = subparsers.add_parser("networks", help="List networks")
+    parser_networks.add_argument("--networkType", required=False, help="Specify the type of network to display")
     
     parser_split_network = subparsers.add_parser("split-network", help="Split a network")
     parser_split_network.add_argument("--network", required=True, help="Specify the network to split")
     parser_split_network.add_argument("--subnets", type=int, required=True, help="Specify the number of subnets to create")
+
+    parser_jobs = subparsers.add_parser("jobs", help="Get list of CI jobs with leases")
     
     args = parser.parse_args()
     
@@ -342,9 +425,11 @@ def main():
     elif args.command == "status":
         printStatus()
     elif args.command == "networks":
-        listNetworks()
+        listNetworks(args.networkType)
     elif args.command == "split-network":
-        splitNetwork(args.network, args.subnets)        
+        splitNetwork(args.network, args.subnets)
+    elif args.command == "jobs":
+        jobs()
     else:
         parser.print_help()
 
