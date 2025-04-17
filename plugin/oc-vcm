@@ -298,6 +298,43 @@ def splitNetwork(name, networkCount):
         print("applying " + file_name)
         applyManifest(file_name)
 
+def jobs():
+    nameMaxLen = 0
+    leases = getLeases()
+
+    jobs = {}
+    for lease in leases:
+        jobName = "unknown"
+
+        # Some leases do not have job-name set.  These are normally created by bot
+        if "job-name" in lease["metadata"]["labels"]:
+            jobName = lease["metadata"]["labels"]["job-name"]
+
+        if jobName in jobs:
+            job = jobs[jobName]
+            job["count"] += 1
+        else:
+            job = {}
+            job["name"] = jobName
+            job["count"] = 1
+            jobs[jobName] = job
+
+            # Calculate max name length for field output
+            nameLen = len(jobName)
+            if nameLen > nameMaxLen:
+                nameMaxLen = nameLen
+
+    countLen = len("Count")
+
+    header = "+".ljust(nameMaxLen+3,"-") + "+".ljust(countLen+3,"-") + "+"
+    print(header)
+    print("| Job Name".ljust(nameMaxLen+3) + "| Count".ljust(countLen+3) + "|")
+    print(header)
+    for jobName in jobs:
+        job = jobs[jobName]
+        print("| " + job["name"].ljust(nameMaxLen) + " | " + str(job["count"]).ljust(countLen) + " |")
+    print(header)
+
 def main():
     parser = argparse.ArgumentParser(description="Process some commands.")
     
@@ -344,6 +381,8 @@ def main():
     parser_split_network = subparsers.add_parser("split-network", help="Split a network")
     parser_split_network.add_argument("--network", required=True, help="Specify the network to split")
     parser_split_network.add_argument("--subnets", type=int, required=True, help="Specify the number of subnets to create")
+
+    parser_jobs = subparsers.add_parser("jobs", help="Get list of CI jobs with leases")
     
     args = parser.parse_args()
     
@@ -370,6 +409,8 @@ def main():
         listNetworks(args.networkType)
     elif args.command == "split-network":
         splitNetwork(args.network, args.subnets)
+    elif args.command == "jobs":
+        jobs()
     else:
         parser.print_help()
 
