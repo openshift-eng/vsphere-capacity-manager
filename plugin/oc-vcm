@@ -218,23 +218,48 @@ def setCapacity(poolName, cpu=None, memory=None):
     applyPool(pool)
     return pool
 
-def listNetworks():
+def listNetworks(networkType):
     nameMaxLen = 0
+    networkInfo = {}
     networks = getNetworks()
+    leases = getLeases()
+
+    # Iterate through each network and determine field data
     for network in networks:
-        nameLen = len(network["metadata"]["name"])
+        leaseCount = 0
+        networkName = network["metadata"]["name"]
+
+        # Calculate max name length for field output
+        nameLen = len(networkName)
         if nameLen > nameMaxLen:
             nameMaxLen = nameLen
+
+        # Search each lease and find any that has owner ref to the network
+        for lease in leases:
+            # Go through each owner ref
+            if "ownerReferences" not in lease["metadata"]:
+                continue
+
+            ownerRefs = lease["metadata"]["ownerReferences"]
+            if ownerRefs != None:
+                for owner in lease["metadata"]["ownerReferences"]:
+                    if owner["kind"] == "Network" and owner["name"] == networkName:
+                        leaseCount += 1
+
+        networkInfo[networkName] = leaseCount
+
     nameMaxLen += 3
-    networkTypeLen = len("Network Type") + 2
+    networkTypeLen = len("nested-multi-tenant") + 2
     cidrLen = 20
+    countLen = len("leases") + 2
     
-    header = "+".ljust(nameMaxLen+2,"-") + "+".ljust(networkTypeLen+2,"-") + "+".ljust(cidrLen+3, "-") + "+"
+    header = "+".ljust(nameMaxLen+2,"-") + "+".ljust(networkTypeLen+2,"-") + "+".ljust(cidrLen+3, "-") + "+".ljust(countLen+3, "-") + "+"
     print(header)
-    print("| Network Name".ljust(nameMaxLen+2) + "| Network Type".ljust(networkTypeLen+2) + "| CIDR".ljust(cidrLen+3) + "|")
+    print("| Network Name".ljust(nameMaxLen+2) + "| Network Type".ljust(networkTypeLen+2) + "| CIDR".ljust(cidrLen+3) + "| Leases".ljust(countLen+3) + "|")
     print(header)
     for network in networks:
-        print("| " + network["metadata"]["name"].ljust(nameMaxLen) + "| " + getNetworkType(network).ljust(networkTypeLen) + "| " + network["spec"]["machineNetworkCidr"].ljust(cidrLen+1) + "|")
+        if networkType == None or getNetworkType(network) == networkType:
+            print("| " + network["metadata"]["name"].ljust(nameMaxLen) + "| " + getNetworkType(network).ljust(networkTypeLen) + "| " + network["spec"]["machineNetworkCidr"].ljust(cidrLen+1) + "| " + str(networkInfo[network["metadata"]["name"]]).ljust(countLen+1) + "|")
     print(header)
 
 def splitNetwork(name, networkCount):
@@ -313,8 +338,8 @@ def main():
 
     parser_status = subparsers.add_parser("status", help="Get status of the capacity manager")
 
-
     parser_networks = subparsers.add_parser("networks", help="List networks")
+    parser_networks.add_argument("--networkType", required=False, help="Specify the type of network to display")
     
     parser_split_network = subparsers.add_parser("split-network", help="Split a network")
     parser_split_network.add_argument("--network", required=True, help="Specify the network to split")
@@ -342,9 +367,9 @@ def main():
     elif args.command == "status":
         printStatus()
     elif args.command == "networks":
-        listNetworks()
+        listNetworks(args.networkType)
     elif args.command == "split-network":
-        splitNetwork(args.network, args.subnets)        
+        splitNetwork(args.network, args.subnets)
     else:
         parser.print_help()
 
