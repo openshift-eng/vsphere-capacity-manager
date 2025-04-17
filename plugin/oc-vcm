@@ -19,6 +19,19 @@ def getLeases():
     output = run_executable("oc", "get", "leases.vspherecapacitymanager.splat.io", "-n", "vsphere-infra-helpers", "-o", "json")
     return(json.loads(output)['items'])
 
+def getLeasesForPool(poolName):
+    matchingLeases = []
+    leases = getLeases()
+
+    for lease in leases:
+        if "ownerReferences" in lease["metadata"]:
+            for owner in lease["metadata"]["ownerReferences"]:
+                if owner["kind"] == "Pool" and owner["name"] == poolName:
+                    matchingLeases.append(lease)
+                    break
+
+    return matchingLeases
+
 def getNetworks():
     output = run_executable("oc", "get", "networks.vspherecapacitymanager.splat.io", "-n", "vsphere-infra-helpers", "-o", "json")
     return(json.loads(output)['items'])
@@ -116,13 +129,19 @@ def printStatus():
     print("| Pool Name".ljust(nameMaxLen) + "| Avail Capacity".ljust(usageLen) + "| Cordoned".ljust(cordonLen+1) + "| Excluded".ljust(excludedLen+1) + "|")
     print(header)
     header = "+".ljust(nameMaxLen,"-") + "+".ljust(usageLen,"-") + "+".ljust(cordonLen+1, "-") + "+".ljust(excludedLen+1, "-") + "+"    
-    for pool in getPools():        
+    for pool in getPools():
+        # Get number of leases associated with this pool
+        leases = getLeasesForPool(pool["metadata"]["name"])
+
         cpuUsage    = "CPU: " + format((pool["status"]["vcpus-available"] / pool["spec"]["vcpus"]), ".0%")
         memoryUsage = "Memory: " + format((pool["status"]["memory-available"] / pool["spec"]["memory"]), ".0%")
         networkUsage = "Network: " + format(pool["status"]["network-available"] / len(pool["spec"]["topology"]["networks"]), ".0%")
+        leaseCount = "Leases: " + str(len(leases))
+
         print("| " + pool["metadata"]["name"].ljust(nameMaxLen-2) + "| " + cpuUsage.ljust(usageLen-2) + "| " + str(pool["spec"]["noSchedule"]).ljust(cordonLen-1) + "| " + str(pool["spec"]["exclude"]) .ljust(excludedLen-1) + "|")
         print("| ".ljust(nameMaxLen) + "| " + memoryUsage.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
         print("| ".ljust(nameMaxLen) + "| " + networkUsage.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
+        print("| ".ljust(nameMaxLen) + "| " + leaseCount.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
         print(header)        
 
     leaseCount, pendingLeases, singleTenantUsage, multiTenantUsage, singleTenantPending, multiTenantPending, singleTenantPartial, multiTenantPartial = getLeaseStatus()
