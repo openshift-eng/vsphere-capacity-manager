@@ -2,6 +2,9 @@ package test
 
 import (
 	"fmt"
+	"log"
+
+	"github.com/onsi/gomega"
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/controller"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -81,4 +84,39 @@ func IsLeaseOwnedByKinds(lease *v1.Lease, kinds ...string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func VerifyCondition(lease *v1.Lease, conditionType v1.ConditionType, status v1.ConditionStatus) bool {
+	var targetCondition *v1.Condition
+
+	log.Printf("Checking condition %v for type %v\n", lease.Status.Conditions, conditionType)
+	for _, condition := range lease.Status.Conditions {
+		log.Printf("Found condition %v", condition.Type)
+		if condition.Type == conditionType {
+			targetCondition = &condition
+			break
+		}
+	}
+	gomega.Expect(targetCondition).ShouldNot(gomega.BeNil(), fmt.Sprintf("condition %s should be set for lease %s", conditionType, lease.Name))
+	gomega.Expect(targetCondition.Status).Should(gomega.Equal(status), fmt.Sprintf("condition %s should be %s", conditionType, status))
+
+	return true
+}
+
+func VerifyConditionReason(lease *v1.Lease, conditionType v1.ConditionType, status v1.ConditionStatus, reason string) bool {
+	var targetCondition *v1.Condition
+
+	log.Printf("Checking condition %v for type %v\n", lease.Status.Conditions, conditionType)
+	for _, condition := range lease.Status.Conditions {
+		log.Printf("Found condition %v", condition.Type)
+		if condition.Type == conditionType {
+			targetCondition = &condition
+			break
+		}
+	}
+	gomega.Expect(targetCondition).ShouldNot(gomega.BeNil(), fmt.Sprintf("condition %s should be set for lease %s", conditionType, lease.Name))
+	gomega.Expect(targetCondition.Status).Should(gomega.Equal(status), fmt.Sprintf("condition %s should be %s", conditionType, status))
+	gomega.Expect(targetCondition.Reason).Should(gomega.Equal(reason), fmt.Sprintf("condition %s should have reason '%s'", conditionType, reason))
+
+	return true
 }

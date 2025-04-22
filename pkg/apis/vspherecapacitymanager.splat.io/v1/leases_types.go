@@ -78,6 +78,11 @@ type LeaseStatus struct {
 	// Phase is the current phase of the lease
 	// +optional
 	Phase Phase `json:"phase,omitempty"`
+
+	// conditions defines the current state of the Machine
+	// +listType=map
+	// +listMapKey=type
+	Conditions []Condition `json:"conditions,omitempty"`
 }
 
 type Leases []*Lease
