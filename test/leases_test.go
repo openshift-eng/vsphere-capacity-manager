@@ -9,14 +9,15 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
-	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/controller"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2/textlogger"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+
+	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
+	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/controller"
 )
 
 var _ = Describe("Lease management", func() {
@@ -203,6 +204,9 @@ var _ = Describe("Lease management", func() {
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(req), req)
 				return req.Status.Phase == v1.PHASE_FULFILLED
 			}).Should(BeTrue())
+
+			// Get conditions and verify fulfilled is true
+			VerifyCondition(req, v1.LeaseConditionTypeFulfilled, v1.ConditionTrue)
 		})
 
 		leases := &v1.LeaseList{}
@@ -242,8 +246,16 @@ var _ = Describe("Lease management", func() {
 					return false
 				}
 
+				// Get conditions and verify fulfilled is true
+				VerifyCondition(lease1, v1.LeaseConditionTypeFulfilled, v1.ConditionTrue)
+
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease2), lease2)
-				return lease2.Status.Phase == v1.PHASE_FULFILLED
+				if lease2.Status.Phase != v1.PHASE_FULFILLED {
+					return false
+				}
+
+				// Get conditions and verify fulfilled is true
+				return VerifyCondition(lease2, v1.LeaseConditionTypeFulfilled, v1.ConditionTrue)
 			}).Should(BeTrue())
 		})
 
@@ -334,6 +346,9 @@ var _ = Describe("Lease management", func() {
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
 				return lease.Status.Phase == v1.PHASE_FULFILLED
 			}).Should(BeTrue())
+
+			// Get conditions and verify fulfilled is true
+			VerifyCondition(lease, v1.LeaseConditionTypeFulfilled, v1.ConditionTrue)
 		})
 
 		By("checking the lease", func() {
@@ -626,6 +641,12 @@ var _ = Describe("Lease management", func() {
 				//log.Printf("lease 2 phase: %+v", lease2.Status.Phase)
 				return lease2.Status.Phase == v1.PHASE_PARTIAL
 			}).Should(BeTrue())
+
+			// Get conditions and verify partial is true
+			VerifyCondition(lease2, v1.LeaseConditionTypePartial, v1.ConditionTrue)
+
+			// Get conditions and verify partial is true
+			VerifyCondition(lease2, v1.LeaseConditionTypePending, v1.ConditionFalse)
 		})
 
 		// Now delete the first lease to free up some networks for the test lease
@@ -1008,6 +1029,64 @@ var _ = Describe("Lease management", func() {
 					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1) != nil
 				}).Should(BeTrue())
 			})
+		})
+	})
+
+	// This test is to verify a fix for issue with private ci jobs that were requesting multi zone with multi
+	It("should have correct conditions when no available pools", func() {
+		var fillerLease, lease1 *v1.Lease
+
+		// Create a lease to take all CPU from the pool.
+		By("creating a filler lease to take all cpu from pool", func() {
+			fillerLease = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-1").WithBoskosID("vsphere-elastic-11").Build()
+			Expect(fillerLease).NotTo(BeNil())
+			fillerLease.Spec.VCpus = 32
+			Expect(k8sClient.Create(ctx, fillerLease)).To(Succeed())
+		})
+
+		// Wait for the start lease to be fulfilled
+		By("waiting for filler lease to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(fillerLease), fillerLease)
+				return fillerLease.Status.Phase == v1.PHASE_FULFILLED
+			}).Should(BeTrue())
+
+			// Get conditions and verify fulfilled is true
+			VerifyCondition(fillerLease, v1.LeaseConditionTypeFulfilled, v1.ConditionTrue)
+		})
+
+		// Create a lease to take all CPU from the pool.
+		By("creating the lease that will be blocked due to not enough CPU", func() {
+			lease1 = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-1").WithBoskosID("vsphere-elastic-12").WithName("lease1").Build()
+			Expect(lease1).NotTo(BeNil())
+
+			Expect(k8sClient.Create(ctx, lease1)).To(Succeed())
+		})
+
+		// Wait for the start lease to be fulfilled
+		By("waiting for filler lease to be Pending with Fulfill having an error", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1)
+				fmt.Printf("%+v\n", lease1)
+				if lease1.Status.Phase != v1.PHASE_PENDING {
+					return false
+				}
+
+				for _, condition := range lease1.Status.Conditions {
+					if condition.Type == v1.LeaseConditionTypeFulfilled {
+						if condition.Status != v1.ConditionFalse || condition.Reason != v1.ReasonLeaseNoPool {
+							return false
+						}
+					}
+				}
+				return true
+			}).Should(BeTrue())
+
+			// Get conditions and verify fulfilled is false
+			VerifyConditionReason(lease1, v1.LeaseConditionTypeFulfilled, v1.ConditionFalse, v1.ReasonLeaseNoPool)
+
+			// Get conditions and verify pending is true
+			VerifyCondition(lease1, v1.LeaseConditionTypePending, v1.ConditionTrue)
 		})
 	})
 })
