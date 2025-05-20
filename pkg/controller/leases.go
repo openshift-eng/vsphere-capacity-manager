@@ -9,18 +9,18 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-
-	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/utils"
-
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
+	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/utils"
+	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/utils/conditions"
 )
 
 const (
@@ -401,6 +401,20 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		lease.Status.Name = "pending"
 		lease.Status.ShortName = "pending"
 		lease.Status.Topology.Networks = append(lease.Status.Topology.Networks, "/pending/network/pending")
+
+		conditions.Set(lease, conditions.FalseCondition(
+			v1.LeaseConditionTypeFulfilled,
+		))
+		conditions.Set(lease, conditions.FalseCondition(
+			v1.LeaseConditionTypeDelayed,
+		))
+		conditions.Set(lease, conditions.TrueCondition(
+			v1.LeaseConditionTypePending,
+		))
+		conditions.Set(lease, conditions.FalseCondition(
+			v1.LeaseConditionTypePartial,
+		))
+
 		if err := l.Status().Update(ctx, lease); err != nil {
 			return ctrl.Result{}, fmt.Errorf("unable to set the initial status on the lease %s: %w", lease.Name, err)
 		}
@@ -463,8 +477,22 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	updatedPools := reconcilePoolStates()
 
+	// TODO: How often are we hitting this and can we remove this and just use the one above?
 	if len(lease.Status.Phase) == 0 {
 		lease.Status.Phase = v1.PHASE_PENDING
+
+		conditions.Set(lease, conditions.FalseCondition(
+			v1.LeaseConditionTypeFulfilled,
+		))
+		conditions.Set(lease, conditions.FalseCondition(
+			v1.LeaseConditionTypeDelayed,
+		))
+		conditions.Set(lease, conditions.TrueCondition(
+			v1.LeaseConditionTypePending,
+		))
+		conditions.Set(lease, conditions.FalseCondition(
+			v1.LeaseConditionTypePartial,
+		))
 	} else {
 		log.Printf("processing lease %v with Phase %v", lease.Name, lease.Status.Phase)
 	}
@@ -479,18 +507,44 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if shouldLeaseBeDelayed(lease) {
 		log.Printf("=========== lease %v is being delayed due to presence of higher priority leases ===========", lease.Name)
 
+		conditions.Set(lease, conditions.TrueCondition(
+			v1.LeaseConditionTypeDelayed,
+		))
+		conditions.Set(lease, conditions.FalseConditionWithReason(
+			v1.LeaseConditionTypeFulfilled,
+			v1.ReasonLeaseDelayed,
+			v1.ConditionSeverityInfo,
+			"lease is being delayed due to presence of higher priority leases",
+		))
+
+		if err := l.Client.Status().Update(ctx, lease); err != nil {
+			return reconcile.Result{}, err
+		}
+
 		// Since we are delaying this lease, let's force the oldest lease to be updated to see if it can now be fulfilled.
 		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
 
 		return ctrl.Result{}, fmt.Errorf("lease %v is being delayed", lease.Name)
 	}
 
+	// Since lease is not delayed, clear the condition
+	conditions.Set(lease, conditions.FalseCondition(
+		v1.LeaseConditionTypeDelayed,
+	))
+
 	pool := &v1.Pool{}
 	if ref := utils.DoesLeaseHavePool(lease); ref == nil {
 		pool, err = utils.GetPoolWithStrategy(lease, updatedPools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
 		if err != nil {
-			if l.Client.Status().Update(ctx, lease) != nil {
-				log.Printf("unable to update lease: %v", err)
+			conditions.Set(lease, conditions.FalseConditionWithReason(
+				v1.LeaseConditionTypeFulfilled,
+				v1.ReasonLeaseNoPool,
+				v1.ConditionSeverityWarning,
+				err.Error(),
+			))
+
+			if uErr := l.Client.Status().Update(ctx, lease); uErr != nil {
+				log.Printf("unable to update lease: %v", uErr)
 			}
 
 			return ctrl.Result{}, fmt.Errorf("unable to get matching pool: %v", err)
@@ -571,8 +625,30 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	log.Printf("Lease %v has %d networks assigned: %v", lease.Name, len(lease.Status.Topology.Networks), lease.Status.Topology.Networks)
 	if len(lease.Status.Topology.Networks) == lease.Spec.Networks {
 		lease.Status.Phase = v1.PHASE_FULFILLED
+
+		conditions.Set(lease, conditions.TrueCondition(
+			v1.LeaseConditionTypeFulfilled,
+		))
+		conditions.Set(lease, conditions.FalseCondition(
+			v1.LeaseConditionTypePending,
+		))
+		conditions.Set(lease, conditions.FalseCondition(
+			v1.LeaseConditionTypePartial,
+		))
 	} else {
 		lease.Status.Phase = v1.PHASE_PARTIAL
+		conditions.Set(lease, conditions.FalseCondition(
+			v1.LeaseConditionTypePending,
+		))
+		conditions.Set(lease, conditions.FalseConditionWithReason(
+			v1.LeaseConditionTypeFulfilled,
+			v1.ReasonLeasePartial,
+			v1.ConditionSeverityInfo,
+			fmt.Sprintf("lease is currently assigned %v of %v networks", len(lease.Status.Topology.Networks), lease.Spec.Networks),
+		))
+		conditions.Set(lease, conditions.TrueCondition(
+			v1.LeaseConditionTypePartial,
+		))
 	}
 
 	leaseStatus := lease.Status.DeepCopy()
