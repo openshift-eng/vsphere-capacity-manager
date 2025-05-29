@@ -25,6 +25,7 @@ import (
 
 const (
 	BoskosIdLabel             = "boskos-lease-id"
+	JobNameLabel              = "job-name"
 	ALLOW_MULTI_TO_USE_SINGLE = false
 )
 
@@ -479,6 +480,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// TODO: How often are we hitting this and can we remove this and just use the one above?
 	if len(lease.Status.Phase) == 0 {
+		log.Printf("setting lease %s status to %s", lease.Name, v1.PHASE_PENDING)
 		lease.Status.Phase = v1.PHASE_PENDING
 
 		conditions.Set(lease, conditions.FalseCondition(
@@ -493,9 +495,13 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		conditions.Set(lease, conditions.FalseCondition(
 			v1.LeaseConditionTypePartial,
 		))
-	} else {
-		log.Printf("processing lease %v with Phase %v", lease.Name, lease.Status.Phase)
 	}
+
+	jobName, exists := lease.Labels[JobNameLabel]
+	if !exists {
+		jobName = "Unknown Job"
+	}
+	log.Printf("processing lease %v [%v] with Phase %v", lease.Name, jobName, lease.Status.Phase)
 
 	// Set default network type
 	if len(lease.Spec.NetworkType) == 0 {
