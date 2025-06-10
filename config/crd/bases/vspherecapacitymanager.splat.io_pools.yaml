@@ -208,23 +208,29 @@ spec:
             description: PoolStatus defines the status for a pool
             properties:
               datastore-available:
-                description: StorageAvailable is the amount of storage in GB available
+                description: datastore-available is the amount of storage in GB available
                   in the pool
                 type: integer
               initialized:
                 description: Initialized when true, the status fields have been initialized
                 type: boolean
+              lease-count:
+                description: lease-count is the number of leases assigned to the pool
+                type: integer
               memory-available:
-                description: MemoryAvailable is the amount of memory in GB available
+                description: memory-available is the amount of memory in GB available
                   in the pool
                 type: integer
               network-available:
-                description: Networks is the number of networks available in the pool
+                description: network-available is the number of networks available
+                  in the pool
                 type: integer
               vcpus-available:
-                description: VCPUsAvailable is the number of vCPUs available in the
+                description: vcpus-available is the number of vCPUs available in the
                   pool
                 type: integer
+            required:
+            - lease-count
             type: object
         required:
         - spec
