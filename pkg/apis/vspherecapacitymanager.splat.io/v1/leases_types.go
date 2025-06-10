@@ -83,6 +83,9 @@ type LeaseStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []Condition `json:"conditions,omitempty"`
+
+	// JobLink defines a link to the job that owns this lease.  Its primarily used when debugging issues w/ lease management.
+	JobLink string `json:"job-link,omitempty"`
 }
 
 type Leases []*Lease

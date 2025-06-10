@@ -27,6 +27,22 @@ const (
 	BoskosIdLabel             = "boskos-lease-id"
 	JobNameLabel              = "job-name"
 	ALLOW_MULTI_TO_USE_SINGLE = false
+
+	// PROW_JOB_PERIODICAL_URL is used to generate URL for periodical jobs.  Need to supply PROW_JOB and PROW_BUILD_ID.
+	PROW_JOB_PERIODICAL_URL = "https://prow.ci.openshift.org/view/gs/test-platform-results/logs/%v/%v"
+
+	// PROW_JOB_PRESUBMIT_URL is used to generate URL for presubmit jobs.  Need to supply GIT_ORG, GIT_REPO, GIT_PR, PROW_JOB, and PROW_BUILD_ID.
+	PROW_JOB_PRESUBMIT_URL = "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/pull/%v_%v/%v/%v/%v"
+
+	PROW_JOB_TYPE_KEY = "prow-job-type"
+	PROW_JOB_KEY      = "prow-job-name"
+	PROW_BUILD_ID_KEY = "prow-build-id"
+	GIT_ORG_KEY       = "git-org"
+	GIT_REPO_KEY      = "git-repo"
+	GIT_PR_KEY        = "git-pr"
+
+	PERIODICAL_JOB_TYPE = "periodic"
+	PRESUBMIT_JOB_TYPE  = "presubmit"
 )
 
 type LeaseReconciler struct {
@@ -376,6 +392,23 @@ func doesLeaseContainPortGroup(lease *v1.Lease, pool *v1.Pool, network *v1.Netwo
 	return false
 }
 
+func generateJobLink(lease *v1.Lease) string {
+	jobURL := ""
+	if lease.Annotations != nil {
+		switch lease.Annotations[PROW_JOB_TYPE_KEY] {
+		case PERIODICAL_JOB_TYPE:
+			jobURL = fmt.Sprintf(PROW_JOB_PERIODICAL_URL, lease.Annotations[PROW_JOB_KEY], lease.Annotations[PROW_BUILD_ID_KEY])
+		case PRESUBMIT_JOB_TYPE:
+			jobURL = fmt.Sprintf(PROW_JOB_PRESUBMIT_URL, lease.Annotations[GIT_ORG_KEY], lease.Annotations[GIT_REPO_KEY], lease.Annotations[GIT_PR_KEY], lease.Annotations[PROW_JOB_KEY], lease.Annotations[PROW_BUILD_ID_KEY])
+		default:
+			log.Printf("unknown job type: %v", lease.Annotations[PROW_JOB_TYPE_KEY])
+		}
+	} else {
+		log.Printf("Unable to generate job url for lease %v due to missing annotations", lease.Name)
+	}
+	return jobURL
+}
+
 func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var err error
 	reconcileLock.Lock()
@@ -402,6 +435,10 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		lease.Status.Name = "pending"
 		lease.Status.ShortName = "pending"
 		lease.Status.Topology.Networks = append(lease.Status.Topology.Networks, "/pending/network/pending")
+
+		// Add the job link / info to status field.
+		lease.Status.JobLink = generateJobLink(lease)
+		log.Printf("generated job url '%v' for lease '%v'", lease.Status.JobLink, lease.Name)
 
 		conditions.Set(lease, conditions.FalseCondition(
 			v1.LeaseConditionTypeFulfilled,

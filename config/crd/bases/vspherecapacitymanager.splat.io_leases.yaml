@@ -143,6 +143,10 @@ spec:
                 description: EnvVars a freeform string which contains bash which is
                   to be sourced by the holder of the lease.
                 type: string
+              job-link:
+                description: JobLink defines a link to the job that owns this lease.  Its
+                  primarily used when debugging issues w/ lease management.
+                type: string
               name:
                 description: name defines the arbitrary but unique name of a failure
                   domain.

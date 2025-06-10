@@ -1088,5 +1088,114 @@ var _ = Describe("Lease management", func() {
 			// Get conditions and verify pending is true
 			VerifyCondition(lease1, v1.LeaseConditionTypePending, v1.ConditionTrue)
 		})
+
+		// Now delete the leases
+		By("deleting the leases", func() {
+			By("by deleting the filler lease", func() {
+				Expect(k8sClient.Delete(ctx, fillerLease)).To(Succeed())
+			})
+			By("waiting for the periodical lease to be deleted", func() {
+				Eventually(func() bool {
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(fillerLease), fillerLease) != nil
+				}).Should(BeTrue())
+			})
+			By("by deleting the lease1 lease", func() {
+				Expect(k8sClient.Delete(ctx, lease1)).To(Succeed())
+			})
+			By("waiting for the lease1 lease to be deleted", func() {
+				Eventually(func() bool {
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1) != nil
+				}).Should(BeTrue())
+			})
+		})
+	})
+
+	// Verify prow job url is set when expected.
+	It("should set the prow job url", func() {
+		var periodicalLease, presubmitLease, missingLease *v1.Lease
+
+		// Create a periodical lease
+		By("creating a periodical lease", func() {
+			periodicalLease = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-1").WithBoskosID("vsphere-elastic-11").WithProwAnnotations(controller.PERIODICAL_JOB_TYPE, "periodical-test").Build()
+			Expect(periodicalLease).NotTo(BeNil())
+			Expect(k8sClient.Create(ctx, periodicalLease)).To(Succeed())
+		})
+
+		// Wait for the periodical lease to be fulfilled
+		By("waiting for periodical lease to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(periodicalLease), periodicalLease)
+				return periodicalLease.Status.Phase == v1.PHASE_FULFILLED
+			}).Should(BeTrue(), "Lease should be fulfilled")
+
+			// Make sure job url is set (https://prow.ci.openshift.org/view/gs/test-platform-results/logs)
+			Expect(periodicalLease.Status.JobLink).Should(ContainSubstring("https://prow.ci.openshift.org/view/gs/test-platform-results/logs"), "Job URL should be for the periodical logs")
+		})
+
+		// Create a presubmit lease
+		By("creating a presubmit lease", func() {
+			presubmitLease = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-1").WithBoskosID("vsphere-elastic-9").WithProwAnnotations(controller.PRESUBMIT_JOB_TYPE, "presubmit-test").Build()
+			Expect(presubmitLease).NotTo(BeNil())
+			Expect(k8sClient.Create(ctx, presubmitLease)).To(Succeed())
+		})
+
+		// Wait for the presubmit lease to be fulfilled
+		By("waiting for presubmit lease to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(presubmitLease), presubmitLease)
+				return presubmitLease.Status.Phase == v1.PHASE_FULFILLED
+			}).Should(BeTrue(), "Lease should be fulfilled")
+
+			// Make sure job url is set (https://prow.ci.openshift.org/view/gs/test-platform-results/logs)
+			Expect(presubmitLease.Status.JobLink).Should(ContainSubstring("https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs"), "Job URL should be for the presubmit logs")
+		})
+
+		// Create a lease with annotations, but missing the prow job type field
+		By("creating a lease with missing type annotation", func() {
+			missingLease = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-2").WithBoskosID("vsphere-elastic-8").WithName("missing-annotation-lease").Build()
+			missingLease.Annotations = map[string]string{}
+			missingLease.Annotations["random"] = "blah"
+			Expect(missingLease).NotTo(BeNil())
+			Expect(k8sClient.Create(ctx, missingLease)).To(Succeed())
+		})
+
+		// Wait for the missing annotation lease to be fulfilled
+		By("waiting for lease with missing annotation to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(missingLease), missingLease)
+				return missingLease.Status.Phase == v1.PHASE_FULFILLED
+			}).Should(BeTrue(), "Lease should be fulfilled")
+
+			// Make sure job url is set to blank
+			Expect(missingLease.Status.JobLink).Should(Equal(""), "Job URL should be empty for lease with missing type")
+		})
+
+		// Now delete the leases
+		By("deleting the leases", func() {
+			By("by deleting the periodical lease", func() {
+				Expect(k8sClient.Delete(ctx, periodicalLease)).To(Succeed())
+			})
+			By("waiting for the periodical lease to be deleted", func() {
+				Eventually(func() bool {
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(periodicalLease), periodicalLease) != nil
+				}).Should(BeTrue())
+			})
+			By("by deleting the presubmit lease", func() {
+				Expect(k8sClient.Delete(ctx, presubmitLease)).To(Succeed())
+			})
+			By("waiting for the presubmit lease to be deleted", func() {
+				Eventually(func() bool {
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(presubmitLease), presubmitLease) != nil
+				}).Should(BeTrue())
+			})
+			By("by deleting the missing annotation lease", func() {
+				Expect(k8sClient.Delete(ctx, missingLease)).To(Succeed())
+			})
+			By("waiting for the presubmit lease to be deleted", func() {
+				Eventually(func() bool {
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(missingLease), missingLease) != nil
+				}).Should(BeTrue())
+			})
+		})
 	})
 })
