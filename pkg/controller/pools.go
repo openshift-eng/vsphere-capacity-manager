@@ -114,6 +114,7 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	PoolMemoryAvailable.With(promLabels).Set(float64(pool.Status.MemoryAvailable))
 	PoolNetworksAvailable.With(promLabels).Set(float64(pool.Status.NetworkAvailable))
 	PoolCpusAvailable.With(promLabels).Set(float64(pool.Status.VCpusAvailable))
+	LeasesInUse.With(promLabels).Set(float64(pool.Status.LeaseCount))
 
 	reconciledPools := reconcilePoolStates()
 	for _, reconciledPool := range reconciledPools {

@@ -143,12 +143,14 @@ func reconcilePoolStates() []*v1.Pool {
 	for poolName, pool := range pools {
 		vcpus := 0
 		memory := 0
+		leaseCount := 0
 
 		for _, lease := range leases {
 			for _, ownerRef := range lease.OwnerReferences {
 				if ownerRef.Kind == pool.Kind && ownerRef.Name == pool.Name {
 					vcpus += lease.Spec.VCpus
 					memory += lease.Spec.Memory
+					leaseCount++
 
 					var serverNetworks map[string]string
 					var exists bool
@@ -177,6 +179,7 @@ func reconcilePoolStates() []*v1.Pool {
 
 		pool.Status.VCpusAvailable = int(float64(pool.Spec.VCpus)*overCommitRatio) - vcpus
 		pool.Status.MemoryAvailable = pool.Spec.Memory - memory
+		pool.Status.LeaseCount = leaseCount
 
 		pools[poolName] = pool
 		outList = append(outList, pool)

@@ -64,18 +64,20 @@ type PoolSpec struct {
 
 // PoolStatus defines the status for a pool
 type PoolStatus struct {
-	// VCPUsAvailable is the number of vCPUs available in the pool
+	// vcpus-available is the number of vCPUs available in the pool
 	// +optional
 	VCpusAvailable int `json:"vcpus-available"`
-	// MemoryAvailable is the amount of memory in GB available in the pool
+	// memory-available is the amount of memory in GB available in the pool
 	// +optional
 	MemoryAvailable int `json:"memory-available"`
-	// StorageAvailable is the amount of storage in GB available in the pool
+	// datastore-available is the amount of storage in GB available in the pool
 	// +optional
 	DatastoreAvailable int `json:"datastore-available"`
-	// Networks is the number of networks available in the pool
+	// network-available is the number of networks available in the pool
 	// +optional
 	NetworkAvailable int `json:"network-available"`
+	// lease-count is the number of leases assigned to the pool
+	LeaseCount int `json:"lease-count"`
 
 	// Initialized when true, the status fields have been initialized
 	// +optional
