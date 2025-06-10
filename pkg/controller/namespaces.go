@@ -72,6 +72,7 @@ func (l *NamespaceReconciler) PruneAbandonedLeases(ctx context.Context) {
 			for _, ns := range namespaces.Items {
 				if ns.Name == leaseNs {
 					nsFound = true
+					break
 				}
 			}
 			if nsFound {

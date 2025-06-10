@@ -5,9 +5,10 @@ import (
 	"log"
 
 	"github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/controller"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type shape int64
@@ -22,6 +23,28 @@ type lease struct {
 	lease v1.Lease
 }
 
+// makeProwAnnotations create the annotations for a prow job
+func makeProwAnnotations(jobType, jobName string) map[string]string {
+	annotations := make(map[string]string)
+
+	switch {
+	case jobType == controller.PERIODICAL_JOB_TYPE:
+		annotations[controller.PROW_JOB_TYPE_KEY] = controller.PERIODICAL_JOB_TYPE
+		annotations[controller.PROW_JOB_KEY] = jobName
+		annotations[controller.PROW_BUILD_ID_KEY] = "123456"
+	case jobType == controller.PRESUBMIT_JOB_TYPE:
+		annotations[controller.PROW_JOB_TYPE_KEY] = controller.PRESUBMIT_JOB_TYPE
+		annotations[controller.PROW_JOB_KEY] = jobName
+		annotations[controller.PROW_BUILD_ID_KEY] = "654321"
+		annotations[controller.GIT_ORG_KEY] = "openshift"
+		annotations[controller.GIT_REPO_KEY] = "origin"
+		annotations[controller.GIT_PR_KEY] = "987"
+	default:
+	}
+
+	return annotations
+}
+
 // GetLease returns a Lease object for testing
 func GetLease() *lease {
 	return &lease{
@@ -30,6 +53,7 @@ func GetLease() *lease {
 				GenerateName: "sample-lease-",
 				Namespace:    "default",
 				Labels:       make(map[string]string),
+				Annotations:  make(map[string]string),
 			},
 		},
 	}
@@ -57,6 +81,12 @@ func (r *lease) WithBoskosID(boskosID string) *lease {
 
 func (r *lease) WithPool(pool string) *lease {
 	r.lease.Spec.RequiredPool = pool
+	return r
+}
+
+func (r *lease) WithProwAnnotations(jobType, jobName string) *lease {
+	// For now, nothing else sets annotations so we'll just set with the prow annotations
+	r.lease.Annotations = makeProwAnnotations(jobType, jobName)
 	return r
 }
 
