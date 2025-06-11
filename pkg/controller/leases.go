@@ -28,21 +28,25 @@ const (
 	JobNameLabel              = "job-name"
 	ALLOW_MULTI_TO_USE_SINGLE = false
 
-	// PROW_JOB_PERIODICAL_URL is used to generate URL for periodical jobs.  Need to supply PROW_JOB and PROW_BUILD_ID.
-	PROW_JOB_PERIODICAL_URL = "https://prow.ci.openshift.org/view/gs/test-platform-results/logs/%v/%v"
+	// PROW_JOB_PERIODICAL_URL is used to generate URL for periodical jobs.  Need to supply PROW_JOB_URL_PREFIX_KEY, PROW_GS_BUCKET_KEY, PROW_JOB and PROW_BUILD_ID.
+	PROW_JOB_PERIODICAL_URL = "%vgs/%v/logs/%v/%v"
 
-	// PROW_JOB_PRESUBMIT_URL is used to generate URL for presubmit jobs.  Need to supply GIT_ORG, GIT_REPO, GIT_PR, PROW_JOB, and PROW_BUILD_ID.
-	PROW_JOB_PRESUBMIT_URL = "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/pull/%v_%v/%v/%v/%v"
+	// PROW_JOB_PRESUBMIT_URL is used to generate URL for presubmit jobs.  Need to supply PROW_JOB_URL_PREFIX_KEY, PROW_GS_BUCKET_KEY,GIT_ORG, GIT_REPO, GIT_PR, PROW_JOB, and PROW_BUILD_ID.
+	PROW_JOB_PRESUBMIT_URL = "%vgs/%v/pr-logs/pull/%v_%v/%v/%v/%v"
 
-	PROW_JOB_TYPE_KEY = "prow-job-type"
-	PROW_JOB_KEY      = "prow-job-name"
-	PROW_BUILD_ID_KEY = "prow-build-id"
-	GIT_ORG_KEY       = "git-org"
-	GIT_REPO_KEY      = "git-repo"
-	GIT_PR_KEY        = "git-pr"
+	PROW_JOB_TYPE_KEY       = "prow-job-type"
+	PROW_JOB_KEY            = "prow-job-name"
+	PROW_JOB_URL_PREFIX_KEY = "prow-url-prefix"
+	PROW_GS_BUCKET_KEY      = "prow-gs-bucket"
+	PROW_BUILD_ID_KEY       = "prow-build-id"
+	GIT_ORG_KEY             = "git-org"
+	GIT_REPO_KEY            = "git-repo"
+	GIT_PR_KEY              = "git-pr"
 
-	PERIODICAL_JOB_TYPE = "periodic"
-	PRESUBMIT_JOB_TYPE  = "presubmit"
+	DEFAULT_PROW_JOB_URL_PREFIX = "https://prow.ci.openshift.org/view/"
+	DEFAULT_PROW_GS_BUCKET      = "test-platform-results"
+	PERIODICAL_JOB_TYPE         = "periodic"
+	PRESUBMIT_JOB_TYPE          = "presubmit"
 )
 
 type LeaseReconciler struct {
@@ -398,11 +402,21 @@ func doesLeaseContainPortGroup(lease *v1.Lease, pool *v1.Pool, network *v1.Netwo
 func generateJobLink(lease *v1.Lease) string {
 	jobURL := ""
 	if lease.Annotations != nil {
+		jobURLPrefix := lease.Annotations[PROW_JOB_URL_PREFIX_KEY]
+		if jobURLPrefix == "" {
+			jobURLPrefix = DEFAULT_PROW_JOB_URL_PREFIX
+		}
+
+		prowGSBucket := lease.Annotations[PROW_GS_BUCKET_KEY]
+		if prowGSBucket == "" {
+			prowGSBucket = DEFAULT_PROW_GS_BUCKET
+		}
+
 		switch lease.Annotations[PROW_JOB_TYPE_KEY] {
 		case PERIODICAL_JOB_TYPE:
-			jobURL = fmt.Sprintf(PROW_JOB_PERIODICAL_URL, lease.Annotations[PROW_JOB_KEY], lease.Annotations[PROW_BUILD_ID_KEY])
+			jobURL = fmt.Sprintf(PROW_JOB_PERIODICAL_URL, jobURLPrefix, prowGSBucket, lease.Annotations[PROW_JOB_KEY], lease.Annotations[PROW_BUILD_ID_KEY])
 		case PRESUBMIT_JOB_TYPE:
-			jobURL = fmt.Sprintf(PROW_JOB_PRESUBMIT_URL, lease.Annotations[GIT_ORG_KEY], lease.Annotations[GIT_REPO_KEY], lease.Annotations[GIT_PR_KEY], lease.Annotations[PROW_JOB_KEY], lease.Annotations[PROW_BUILD_ID_KEY])
+			jobURL = fmt.Sprintf(PROW_JOB_PRESUBMIT_URL, jobURLPrefix, prowGSBucket, lease.Annotations[GIT_ORG_KEY], lease.Annotations[GIT_REPO_KEY], lease.Annotations[GIT_PR_KEY], lease.Annotations[PROW_JOB_KEY], lease.Annotations[PROW_BUILD_ID_KEY])
 		default:
 			log.Printf("unknown job type: %v", lease.Annotations[PROW_JOB_TYPE_KEY])
 		}

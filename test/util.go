@@ -32,10 +32,14 @@ func makeProwAnnotations(jobType, jobName string) map[string]string {
 		annotations[controller.PROW_JOB_TYPE_KEY] = controller.PERIODICAL_JOB_TYPE
 		annotations[controller.PROW_JOB_KEY] = jobName
 		annotations[controller.PROW_BUILD_ID_KEY] = "123456"
+		annotations[controller.PROW_GS_BUCKET_KEY] = "test-platform-results"
+		annotations[controller.PROW_JOB_URL_PREFIX_KEY] = "https://prow.ci.openshift.org/view/"
 	case jobType == controller.PRESUBMIT_JOB_TYPE:
 		annotations[controller.PROW_JOB_TYPE_KEY] = controller.PRESUBMIT_JOB_TYPE
 		annotations[controller.PROW_JOB_KEY] = jobName
 		annotations[controller.PROW_BUILD_ID_KEY] = "654321"
+		annotations[controller.PROW_GS_BUCKET_KEY] = "test-platform-results"
+		annotations[controller.PROW_JOB_URL_PREFIX_KEY] = "https://prow.ci.openshift.org/view/"
 		annotations[controller.GIT_ORG_KEY] = "openshift"
 		annotations[controller.GIT_REPO_KEY] = "origin"
 		annotations[controller.GIT_PR_KEY] = "987"
