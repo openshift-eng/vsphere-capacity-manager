@@ -25,8 +25,13 @@ var (
 		Name: "leases_in_use",
 		Help: "Number of leases in use",
 	}, []string{"namespace", "pool"})
+
+	LeaseCounts = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "leases_counts",
+		Help: "Counts of active leases",
+	}, []string{"namespace", "networkType", "phase"})
 )
 
 func InitMetrics() {
-	metrics.Registry.MustRegister(PoolMemoryAvailable, PoolNetworksAvailable, PoolCpusAvailable, LeasesInUse)
+	metrics.Registry.MustRegister(PoolMemoryAvailable, PoolNetworksAvailable, PoolCpusAvailable, LeasesInUse, LeaseCounts)
 }
