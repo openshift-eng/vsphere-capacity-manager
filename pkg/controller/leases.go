@@ -282,6 +282,18 @@ func (l *LeaseReconciler) triggerLeaseUpdates(ctx context.Context, networkType v
 	}
 }
 
+func updateLeaseMetrics() {
+	LeaseCounts.Reset()
+	for _, lease := range leases {
+		promLabels := make(prometheus.Labels)
+		promLabels["phase"] = string(lease.Status.Phase)
+		promLabels["networkType"] = string(lease.Spec.NetworkType)
+		promLabels["namespace"] = lease.Namespace
+
+		LeaseCounts.With(promLabels).Inc()
+	}
+}
+
 // returns common portgroups that satisfies all known leases for this job. common port groups are scoped
 // to a single vCenter. for multiple vCenters, a network lease for each vCenter will be claimed.
 func (l *LeaseReconciler) getCommonNetworksForLease(lease *v1.Lease) ([]*v1.Network, error) {
@@ -520,6 +532,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		reconcilePoolStates()
 		l.triggerPoolUpdates(ctx)
 		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
+		updateLeaseMetrics()
 		return ctrl.Result{}, nil
 	}
 
@@ -583,6 +596,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		// Since we are delaying this lease, let's force the oldest lease to be updated to see if it can now be fulfilled.
 		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
+		updateLeaseMetrics()
 
 		return ctrl.Result{}, fmt.Errorf("lease %v is being delayed", lease.Name)
 	}
@@ -607,6 +621,8 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				log.Printf("unable to update lease: %v", uErr)
 			}
 
+			// since we do not trigger lease update, we still need to update metrics in case first status update.
+			updateLeaseMetrics()
 			return ctrl.Result{}, fmt.Errorf("unable to get matching pool: %v", err)
 		}
 	} else {
@@ -735,6 +751,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		l.triggerPoolUpdates(ctx)
 		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
 	}
+	updateLeaseMetrics()
 
 	return ctrl.Result{}, nil
 }
