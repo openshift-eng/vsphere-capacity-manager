@@ -112,8 +112,10 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	pools[poolKey] = pool
 
 	PoolMemoryAvailable.With(promLabels).Set(float64(pool.Status.MemoryAvailable))
+	PoolMemoryTotal.With(promLabels).Set(float64(pool.Spec.Memory))
 	PoolNetworksAvailable.With(promLabels).Set(float64(pool.Status.NetworkAvailable))
 	PoolCpusAvailable.With(promLabels).Set(float64(pool.Status.VCpusAvailable))
+	PoolCpusTotal.With(promLabels).Set(float64(pool.Spec.VCpus))
 	LeasesInUse.With(promLabels).Set(float64(pool.Status.LeaseCount))
 
 	reconciledPools := reconcilePoolStates()

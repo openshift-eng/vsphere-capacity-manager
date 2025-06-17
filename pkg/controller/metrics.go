@@ -11,9 +11,19 @@ var (
 		Help: "The amount of memory available in a pool",
 	}, []string{"namespace", "pool"})
 
+	PoolMemoryTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pool_memory_total",
+		Help: "The total amount of memory of a pool",
+	}, []string{"namespace", "pool"})
+
 	PoolCpusAvailable = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pool_cpus_available",
 		Help: "The amount of cpus available in a pool",
+	}, []string{"namespace", "pool"})
+
+	PoolCpusTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pool_cpus_total",
+		Help: "The total amount of cpus of a pool",
 	}, []string{"namespace", "pool"})
 
 	PoolNetworksAvailable = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -33,5 +43,5 @@ var (
 )
 
 func InitMetrics() {
-	metrics.Registry.MustRegister(PoolMemoryAvailable, PoolNetworksAvailable, PoolCpusAvailable, LeasesInUse, LeaseCounts)
+	metrics.Registry.MustRegister(PoolMemoryAvailable, PoolMemoryTotal, PoolNetworksAvailable, PoolCpusAvailable, PoolCpusTotal, LeasesInUse, LeaseCounts)
 }
