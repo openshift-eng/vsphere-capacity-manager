@@ -280,8 +280,8 @@ func (in *NetworkSpec) DeepCopyInto(out *NetworkSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
-	if in.Nameserver != nil {
-		in, out := &in.Nameserver, &out.Nameserver
+	if in.Nameservers != nil {
+		in, out := &in.Nameservers, &out.Nameservers
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
