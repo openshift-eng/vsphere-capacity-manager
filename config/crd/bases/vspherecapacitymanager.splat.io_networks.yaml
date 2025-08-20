@@ -76,6 +76,11 @@ spec:
               machineNetworkCidr:
                 description: MachineNetworkCidr represents the machine network CIDR.
                 type: string
+              nameserver:
+                description: Nameserver the nameserver
+                items:
+                  type: string
+                type: array
               netmask:
                 description: The bitmask in dotted-quad format for this subnet, which
                   specifies the range of spanned IP addresses.
