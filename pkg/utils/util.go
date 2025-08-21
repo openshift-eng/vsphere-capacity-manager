@@ -28,7 +28,7 @@ func init() {
 		export vsphere_datastore="{{.Datastore}}"
 		export vsphere_portgroup="{{.PortGroup}}"
 		export gateway="{{.Gateway}}"
-		export dns_server="{{.Gateway}}"
+		export dns_server="{{.Nameserver}}"
 		export vlanid="{{.VlanId}}"
 		export phydc="{{.IDatacenter}}"
 		export primaryrouterhostname="{{.PrimaryRouterHostname}}"`
@@ -81,6 +81,7 @@ func GenerateEnvVars(lease *v1.Lease, pool *v1.Pool, network *v1.Network) error 
 		PortGroup             string
 		VlanId                string
 		Gateway               string
+		Nameserver            string
 		IDatacenter           string
 		PrimaryRouterHostname string
 	}{
@@ -91,9 +92,15 @@ func GenerateEnvVars(lease *v1.Lease, pool *v1.Pool, network *v1.Network) error 
 		Datastore:             pool.Spec.Topology.Datastore,
 		PortGroup:             portgroup,
 		Gateway:               *network.Spec.Gateway,
+		Nameserver:            *network.Spec.Gateway, // Default to Gateway for legacy usage.  We'll update below if nameservers set.
 		VlanId:                network.Spec.VlanId,
 		IDatacenter:           pool.Spec.IBMPoolSpec.Datacenter,
 		PrimaryRouterHostname: network.Spec.PrimaryRouterHostname,
+	}
+
+	// If Nameserver set, then use it.
+	if len(network.Spec.Nameservers) > 0 {
+		inputs.Nameserver = network.Spec.Nameservers[0]
 	}
 
 	outBytes := new(bytes.Buffer)
