@@ -86,7 +86,7 @@ def getNetworkCounts():
             singleTenant += 1
     return singleTenant, multiTenant
 
-def getLeaseStatus():    
+def getLeaseStatus():
     singleTenant = 0
     multiTenant = 0
     singleTenantPending = 0
@@ -94,9 +94,23 @@ def getLeaseStatus():
     singleTenantPartial = 0
     multiTenantPartial = 0
     count = 0
-    pending = 0
     leases = getLeases()
+
+    # Only count the first lease for each unique boskos-lease-id
+    seen_boskos_ids = set()
+
     for lease in leases:
+        labels = lease.get("metadata", {}).get("labels", {})
+        boskos_id = labels.get("boskos-lease-id")
+        # Fallback to lease name if label is missing
+        if boskos_id is None:
+            boskos_id = lease.get("metadata", {}).get("name")
+
+        # Skip duplicate boskos-lease-id entries
+        if boskos_id in seen_boskos_ids:
+            continue
+        seen_boskos_ids.add(boskos_id)
+
         count += 1
         if lease["spec"]["network-type"] == "multi-tenant":
             multiTenant += 1
@@ -110,13 +124,21 @@ def getLeaseStatus():
                 singleTenantPending += 1
             if lease["status"]["phase"] == "Partial":
                 singleTenantPartial += 1
-        
-    return count, pending, singleTenant, multiTenant, singleTenantPending, multiTenantPending, singleTenantPartial, multiTenantPartial
 
-def printStatus():
+    return count, singleTenant, multiTenant, singleTenantPending, multiTenantPending, singleTenantPartial, multiTenantPartial
+
+def printStatus(includeExcluded):
     singleTenantCount, multiTenantCount = getNetworkCounts()
-    nameMaxLen = 0    
-    for pool in getPools():
+
+    # Prepare pool list based on includeExcluded flag
+    pools = getPools()
+    if includeExcluded:
+        filteredPools = pools
+    else:
+        filteredPools = [p for p in pools if not p["spec"]["exclude"]]
+
+    nameMaxLen = 0
+    for pool in filteredPools:
         nameLen = len(pool["metadata"]["name"])
         if nameLen > nameMaxLen:
             nameMaxLen = nameLen
@@ -129,7 +151,7 @@ def printStatus():
     print("| Pool Name".ljust(nameMaxLen) + "| Avail Capacity".ljust(usageLen) + "| Cordoned".ljust(cordonLen+1) + "| Excluded".ljust(excludedLen+1) + "|")
     print(header)
     header = "+".ljust(nameMaxLen,"-") + "+".ljust(usageLen,"-") + "+".ljust(cordonLen+1, "-") + "+".ljust(excludedLen+1, "-") + "+"    
-    for pool in getPools():
+    for pool in filteredPools:
         # Get number of leases associated with this pool
         leases = getLeasesForPool(pool["metadata"]["name"])
 
@@ -144,10 +166,12 @@ def printStatus():
         print("| ".ljust(nameMaxLen) + "| " + leaseCount.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
         print(header)        
 
-    leaseCount, pendingLeases, singleTenantUsage, multiTenantUsage, singleTenantPending, multiTenantPending, singleTenantPartial, multiTenantPartial = getLeaseStatus()
+    leaseCount, singleTenantUsage, multiTenantUsage, singleTenantPending, multiTenantPending, singleTenantPartial, multiTenantPartial = getLeaseStatus()
 
+    # Print lease counts
     print("\nLease Count: " + str(leaseCount) + ", single-tenant usage: " + str(format(singleTenantUsage / singleTenantCount, ".0%")) + ", multi-tenant usage: " + str(format(multiTenantUsage / multiTenantCount, ".0%")))
-    print("Pending Leases: " + str(pendingLeases) + ", pending single-tenant: " + str(singleTenantPending) + ", pending multi-tenant: " + str(multiTenantPending))
+    # Print CI lease usage
+    print("Pending Leases: " + str(singleTenantPending + multiTenantPending) + ", pending single-tenant: " + str(singleTenantPending) + ", pending multi-tenant: " + str(multiTenantPending))
     print("Partial Leases: " + str(singleTenantPartial + multiTenantPartial) + ", partial single-tenant: " + str(singleTenantPartial) + ", partial multi-tenant: " + str(multiTenantPartial))
 
 def dropPortGroupFromPools(portGroup, poolName):
@@ -392,7 +416,9 @@ def main():
     parser_drop_vlan.add_argument("--vlan", type=str, required=True, help="Specify VLAN ID")
     parser_drop_vlan.add_argument("--pool", default="", help="Specify the pool to for which the VLAN is to be dropped. If undefined, VLAN will be dropped from all uncordoned, unexcluded pools.")
 
+    # Status command
     parser_status = subparsers.add_parser("status", help="Get status of the capacity manager")
+    parser_status.add_argument("--include-excluded", action='store_true', required=False, help="Include pools marked as 'excluded' in the status output.")
 
     parser_networks = subparsers.add_parser("networks", help="List networks")
     parser_networks.add_argument("--networkType", required=False, help="Specify the type of network to display")
@@ -423,7 +449,7 @@ def main():
     elif args.command == "drop-vlan":
         dropPortGroupFromPools(args.vlan, args.pool)
     elif args.command == "status":
-        printStatus()
+        printStatus(args.include_excluded)
     elif args.command == "networks":
         listNetworks(args.networkType)
     elif args.command == "split-network":
