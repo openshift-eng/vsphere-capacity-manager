@@ -343,40 +343,95 @@ def splitNetwork(name, networkCount):
 
 def jobs():
     nameMaxLen = 0
+    jobTypeMaxLen = len("Job Type")
     leases = getLeases()
 
+    # Group by (job name, job type)
     jobs = {}
     for lease in leases:
         jobName = "unknown"
+        jobType = "unknown"
 
         # Some leases do not have job-name set.  These are normally created by bot
         if "job-name" in lease["metadata"]["labels"]:
             jobName = lease["metadata"]["labels"]["job-name"]
 
-        if jobName in jobs:
-            job = jobs[jobName]
+        # Get prow job type from annotations when present
+        if "annotations" in lease["metadata"] and "prow-job-type" in lease["metadata"]["annotations"]:
+            jobType = lease["metadata"]["annotations"]["prow-job-type"]
+
+        key = (jobName, jobType)
+        if key in jobs:
+            job = jobs[key]
             job["count"] += 1
         else:
             job = {}
             job["name"] = jobName
+            job["type"] = jobType
             job["count"] = 1
-            jobs[jobName] = job
+            jobs[key] = job
 
-            # Calculate max name length for field output
+            # Calculate max column widths for field output
             nameLen = len(jobName)
             if nameLen > nameMaxLen:
                 nameMaxLen = nameLen
+            typeLen = len(jobType)
+            if typeLen > jobTypeMaxLen:
+                jobTypeMaxLen = typeLen
 
     countLen = len("Count")
 
-    header = "+".ljust(nameMaxLen+3,"-") + "+".ljust(countLen+3,"-") + "+"
+    header = "+".ljust(nameMaxLen+3,"-") + "+".ljust(jobTypeMaxLen+3,"-") + "+".ljust(countLen+3,"-") + "+"
     print(header)
-    print("| Job Name".ljust(nameMaxLen+3) + "| Count".ljust(countLen+3) + "|")
+    print("| Job Name".ljust(nameMaxLen+3) + "| Job Type".ljust(jobTypeMaxLen+3) + "| Count".ljust(countLen+3) + "|")
     print(header)
-    for jobName in jobs:
-        job = jobs[jobName]
-        print("| " + job["name"].ljust(nameMaxLen) + " | " + str(job["count"]).ljust(countLen) + " |")
+    for key in jobs:
+        job = jobs[key]
+        print("| " + job["name"].ljust(nameMaxLen) + " | " + job["type"].ljust(jobTypeMaxLen) + " | " + str(job["count"]).ljust(countLen) + " |")
     print(header)
+
+def printLeases():
+    nameMaxLen = 0
+    leases = getLeases()
+
+    # Columns for per-lease table
+    leaseIdMaxLen = len("Boskos Lease ID")
+    jobTypeMaxLen = len("Job Type")
+    # Use dict to de-duplicate by lease id
+    leasesById = {}
+
+    for lease in leases:
+        metadata = lease.get("metadata", {})
+        labels = metadata.get("labels", {}) or {}
+        annotations = metadata.get("annotations", {}) or {}
+
+        jobName = labels.get("job-name", "unknown")
+
+        # Track max name length
+        nameLen = len(jobName)
+        if nameLen > nameMaxLen:
+            nameMaxLen = nameLen
+
+        # Build per-lease info (dedup by boskos-lease-id)
+        leaseId = labels.get("boskos-lease-id") or metadata.get("name", "unknown")
+        jobType = annotations.get("prow-job-type", "unknown")
+        if leaseId not in leasesById:
+            leasesById[leaseId] = {"leaseId": leaseId, "jobName": jobName, "jobType": jobType}
+            if len(leaseId) > leaseIdMaxLen:
+                leaseIdMaxLen = len(leaseId)
+            if len(jobType) > jobTypeMaxLen:
+                jobTypeMaxLen = len(jobType)
+
+    # Detailed table organized by Lease ID including Job Type
+    header = "+".ljust(leaseIdMaxLen+3,"-") + "+".ljust(nameMaxLen+3,"-") + "+".ljust(jobTypeMaxLen+3,"-") + "+"
+    print(header)
+    print("| Boskos Lease ID".ljust(leaseIdMaxLen+3) + "| Job Name".ljust(nameMaxLen+3) + "| Job Type".ljust(jobTypeMaxLen+3) + "|")
+    print(header)
+    for leaseId in leasesById:
+        entry = leasesById[leaseId]
+        print("| " + entry["leaseId"].ljust(leaseIdMaxLen) + " | " + entry["jobName"].ljust(nameMaxLen) + " | " + entry["jobType"].ljust(jobTypeMaxLen) + " |")
+    print(header)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Process some commands.")
@@ -427,7 +482,11 @@ def main():
     parser_split_network.add_argument("--network", required=True, help="Specify the network to split")
     parser_split_network.add_argument("--subnets", type=int, required=True, help="Specify the number of subnets to create")
 
+    # Jobs command
     parser_jobs = subparsers.add_parser("jobs", help="Get list of CI jobs with leases")
+
+    # Leases command
+    parser_leases = subparsers.add_parser("leases", help="Get list of leases")
     
     args = parser.parse_args()
     
@@ -456,6 +515,8 @@ def main():
         splitNetwork(args.network, args.subnets)
     elif args.command == "jobs":
         jobs()
+    elif args.command == "leases":
+        printLeases()
     else:
         parser.print_help()
 
