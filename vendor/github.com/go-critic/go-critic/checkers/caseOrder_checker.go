@@ -11,7 +11,7 @@ import (
 func init() {
 	var info linter.CheckerInfo
 	info.Name = "caseOrder"
-	info.Tags = []string{"diagnostic"}
+	info.Tags = []string{linter.DiagnosticTag}
 	info.Summary = "Detects erroneous case order inside switch statements"
 	info.Before = `
 switch x.(type) {
@@ -82,7 +82,7 @@ func (c *caseOrderChecker) warnUnknownType(cause, concrete ast.Node) {
 	c.ctx.Warn(cause, "type is not defined %s", concrete)
 }
 
-func (c *caseOrderChecker) checkSwitch(s *ast.SwitchStmt) {
+func (c *caseOrderChecker) checkSwitch(_ *ast.SwitchStmt) {
 	// TODO(quasilyte): can handle expression cases that overlap.
 	// Cases that have narrower value range should go before wider ones.
 }
