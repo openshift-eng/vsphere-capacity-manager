@@ -1,4 +1,4 @@
-FROM golang:1.22 AS builder
+FROM golang:1.24 AS builder
 WORKDIR /go/src/github.com/openshift-eng/vsphere-capacity-manager
 COPY . .
 ENV GO_PACKAGE github.com/openshift-eng/vsphere-capacity-manager
