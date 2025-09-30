@@ -205,7 +205,7 @@ spec:
 status: {}
 ```
 
-See https://github.com/openshift-splat-team/vsphere-capacity-manager/blob/main/pkg/apis/vspherecapacitymanager.splat.io/v1/network_types.go for a  comprehensive description of fields, labels, and annotations.
+See https://github.com/openshift-eng/vsphere-capacity-manager/blob/main/pkg/apis/vspherecapacitymanager.splat.io/v1/network_types.go for a  comprehensive description of fields, labels, and annotations.
 
 ### Network Types
 
@@ -236,7 +236,7 @@ vsphere-elastic-18-4l6p2   24      96           vcenter.ci.ibmc.devcluster.opens
 vsphere-elastic-20-f7dpr   24      96           vcenter.ci.ibmc.devcluster.openshift.com-cidatacenter-cicluster       ci-vlan-847-1-dal10-dal10.pod03    Fulfilled
 ```
 
-See https://github.com/openshift-splat-team/vsphere-capacity-manager/blob/main/pkg/apis/vspherecapacitymanager.splat.io/v1/leases_types.go for a  comprehensive description of fields, labels, and annotations.
+See https://github.com/openshift-eng/vsphere-capacity-manager/blob/main/pkg/apis/vspherecapacitymanager.splat.io/v1/leases_types.go for a  comprehensive description of fields, labels, and annotations.
 
 ## Pools 
 
@@ -253,7 +253,7 @@ vcenter.ci.ibmc.devcluster.openshift.com-cidatacenter-1-cicluster-2   112     44
 vcenter.ci.ibmc.devcluster.openshift.com-cidatacenter-cicluster       224     2944         2                     false      false
 ```
 
-See https://github.com/openshift-splat-team/vsphere-capacity-manager/blob/main/pkg/apis/vspherecapacitymanager.splat.io/v1/pool_types.go for a  comprehensive description of fields, labels, and annotations.
+See https://github.com/openshift-eng/vsphere-capacity-manager/blob/main/pkg/apis/vspherecapacitymanager.splat.io/v1/pool_types.go for a  comprehensive description of fields, labels, and annotations.
 
 ### Pool Authentication
 

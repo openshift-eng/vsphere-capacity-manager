@@ -16,8 +16,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
-	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/controller"
+	v1 "github.com/openshift-eng/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
+	"github.com/openshift-eng/vsphere-capacity-manager/pkg/controller"
 )
 
 var _ = Describe("Lease management", func() {

@@ -8,7 +8,7 @@ package tools
 
 import (
 	_ "github.com/daixiang0/gci" // dependency of hack/go-fmt.sh
-	_ "github.com/golangci/golangci-lint/cmd/golangci-lint"
+	_ "github.com/golangci/golangci-lint/v2/cmd/golangci-lint"
 	// dependency of generating CRD for install-config
 	_ "k8s.io/code-generator" // TODO: Investigate why scripts in this directory are removed and not vendored by go mod.
 	_ "k8s.io/code-generator/cmd/client-gen"

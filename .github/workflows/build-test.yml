@@ -1,4 +1,4 @@
-name: build 
+name: build
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.21'
+        go-version: '1.24'
     - name: image
       uses: redhat-actions/buildah-build@v2
       id: build-image
@@ -19,4 +19,4 @@ jobs:
         image: test
         tags: latest ${{ github.sha }}
         containerfiles: |
-          ./Containerfile      
+          ./Containerfile
