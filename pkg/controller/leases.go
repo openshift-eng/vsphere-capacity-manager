@@ -191,6 +191,10 @@ func reconcilePoolStates() []*v1.Pool {
 			}
 		}
 
+		if pool.Spec.OverCommitRatio == "" {
+			pool.Spec.OverCommitRatio = "1.0"
+		}
+
 		overCommitRatio, err := strconv.ParseFloat(pool.Spec.OverCommitRatio, 32)
 		if err != nil {
 			log.Printf("error converting overCommitRatio to float %v setting to 1.0", err)
