@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"path"
 	"strconv"
 	"time"
@@ -669,6 +670,11 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if len(lease.Status.Topology.Networks) != 0 && lease.Status.Topology.Networks[0] != "/pending/network/pending" {
 			networks = lease.Status.Topology.Networks
 		}
+
+		// shuffle available networks
+		rand.Shuffle(len(availableNetworks), func(i, j int) {
+			availableNetworks[i], availableNetworks[j] = availableNetworks[j], availableNetworks[i]
+		})
 
 		for idx := 0; idx+len(lease.Status.Topology.Networks) < lease.Spec.Networks && idx < len(availableNetworks); idx++ {
 			if !doesLeaseContainPortGroup(lease, pool, availableNetworks[idx]) {
