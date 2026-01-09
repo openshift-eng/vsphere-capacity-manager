@@ -42,6 +42,11 @@ type LeaseSpec struct {
 	VCpus int `json:"vcpus,omitempty"`
 	// Memory is the amount of memory in GB allocated for this lease
 	Memory int `json:"memory,omitempty"`
+	// Pools is the number of pools to return for this lease
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=1
+	// +optional
+	Pools int `json:"pools,omitempty"`
 	// Storage is the amount of storage in GB allocated for this lease
 	// +optional
 	Storage int `json:"storage,omitempty"`
@@ -51,6 +56,12 @@ type LeaseSpec struct {
 	// pool
 	// +optional
 	RequiredPool string `json:"required-pool,omitempty"`
+
+	// PoolSelector is a label selector for pools. If specified, the lease can only
+	// be fulfilled by pools matching all of the specified label key-value pairs.
+	// This works like Kubernetes nodeSelector for selecting pools based on labels.
+	// +optional
+	PoolSelector map[string]string `json:"poolSelector,omitempty"`
 
 	// NetworkType defines the type of network required by the lease.
 	// by default, all networks are treated as single-tenant. single-tenant networks

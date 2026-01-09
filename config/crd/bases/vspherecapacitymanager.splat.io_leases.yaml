@@ -72,6 +72,19 @@ spec:
               networks:
                 description: Networks is the number of networks requested
                 type: integer
+              poolSelector:
+                additionalProperties:
+                  type: string
+                description: PoolSelector is a label selector for pools. If specified,
+                  the lease can only be fulfilled by pools matching all of the specified
+                  label key-value pairs. This works like Kubernetes nodeSelector for
+                  selecting pools based on labels.
+                type: object
+              pools:
+                default: 1
+                description: Pools is the number of pools to return for this lease
+                minimum: 1
+                type: integer
               required-pool:
                 description: RequiredPool when configured, this lease can only be
                   fulfilled by a specific pool
