@@ -7,8 +7,8 @@ import (
 	"github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
-	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/controller"
+	v1 "github.com/openshift-eng/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
+	"github.com/openshift-eng/vsphere-capacity-manager/pkg/controller"
 )
 
 type shape int64

@@ -19,9 +19,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
-	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/utils"
-	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/utils/conditions"
+	v1 "github.com/openshift-eng/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
+	"github.com/openshift-eng/vsphere-capacity-manager/pkg/utils"
+	"github.com/openshift-eng/vsphere-capacity-manager/pkg/utils/conditions"
 )
 
 const (
@@ -190,6 +190,10 @@ func reconcilePoolStates() []*v1.Pool {
 					break
 				}
 			}
+		}
+
+		if pool.Spec.OverCommitRatio == "" {
+			pool.Spec.OverCommitRatio = "1.0"
 		}
 
 		overCommitRatio, err := strconv.ParseFloat(pool.Spec.OverCommitRatio, 32)
