@@ -93,6 +93,44 @@ spec:
                 description: Storage is the amount of storage in GB allocated for
                   this lease
                 type: integer
+              tolerations:
+                description: Tolerations are tolerations that allow this lease to
+                  be scheduled on pools with matching taints. This works like Kubernetes
+                  pod tolerations for scheduling on nodes with taints.
+                items:
+                  description: Toleration represents a toleration that allows a lease
+                    to be scheduled on a pool with matching taints.
+                  properties:
+                    effect:
+                      description: Effect indicates which taint effect to match. Empty
+                        means match all taint effects. When specified, allowed values
+                        are NoSchedule and PreferNoSchedule.
+                      enum:
+                      - NoSchedule
+                      - PreferNoSchedule
+                      - ""
+                      type: string
+                    key:
+                      description: Key is the taint key that the toleration applies
+                        to. Empty means match all taint keys. If the operator is Exists,
+                        the value should be empty, otherwise just a regular key.
+                      type: string
+                    operator:
+                      description: Operator represents the relationship between the
+                        key and value. Valid operators are Exists and Equal. Defaults
+                        to Equal. Exists is equivalent to wildcard for value, so that
+                        a lease can tolerate all taints of a particular category.
+                      enum:
+                      - Exists
+                      - Equal
+                      type: string
+                    value:
+                      description: Value is the taint value the toleration matches
+                        to. If the operator is Exists, the value should be empty,
+                        otherwise just a regular value.
+                      type: string
+                  type: object
+                type: array
               vcpus:
                 description: VCpus is the number of virtual CPUs allocated for this
                   lease

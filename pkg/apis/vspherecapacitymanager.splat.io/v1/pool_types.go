@@ -10,6 +10,31 @@ const (
 	PoolKind                           = "Pool"
 )
 
+// TaintEffect defines the effect of a taint on pools that do not tolerate the taint.
+type TaintEffect string
+
+const (
+	// TaintEffectNoSchedule means leases are not scheduled onto pools with this taint
+	// unless they tolerate the taint.
+	TaintEffectNoSchedule TaintEffect = "NoSchedule"
+	// TaintEffectPreferNoSchedule means the scheduler tries to avoid scheduling leases
+	// onto pools with this taint, but it's not required.
+	TaintEffectPreferNoSchedule TaintEffect = "PreferNoSchedule"
+)
+
+// Taint represents a taint that can be applied to a pool.
+type Taint struct {
+	// Key is the taint key to be applied to a pool.
+	Key string `json:"key"`
+	// Value is the taint value corresponding to the taint key.
+	// +optional
+	Value string `json:"value,omitempty"`
+	// Effect indicates the effect of the taint on leases that do not tolerate the taint.
+	// Valid effects are NoSchedule and PreferNoSchedule.
+	// +kubebuilder:validation:Enum=NoSchedule;PreferNoSchedule
+	Effect TaintEffect `json:"effect"`
+}
+
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
@@ -60,6 +85,10 @@ type PoolSpec struct {
 	// any in progress leases will remain active until they are destroyed.
 	// +optional
 	NoSchedule bool `json:"noSchedule"`
+	// Taints are taints applied to this pool. Leases will not be scheduled on this pool
+	// unless they have matching tolerations. This works like Kubernetes node taints.
+	// +optional
+	Taints []Taint `json:"taints,omitempty"`
 }
 
 // PoolStatus defines the status for a pool

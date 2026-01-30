@@ -16,6 +16,39 @@ const (
 	NetworkTypeMultiTenant  = NetworkType("multi-tenant")
 )
 
+// TolerationOperator is the operator for a toleration.
+type TolerationOperator string
+
+const (
+	// TolerationOpExists means the toleration matches a taint if the key exists.
+	TolerationOpExists TolerationOperator = "Exists"
+	// TolerationOpEqual means the toleration matches a taint if key and value are equal.
+	TolerationOpEqual TolerationOperator = "Equal"
+)
+
+// Toleration represents a toleration that allows a lease to be scheduled on a pool with matching taints.
+type Toleration struct {
+	// Key is the taint key that the toleration applies to. Empty means match all taint keys.
+	// If the operator is Exists, the value should be empty, otherwise just a regular key.
+	// +optional
+	Key string `json:"key,omitempty"`
+	// Operator represents the relationship between the key and value.
+	// Valid operators are Exists and Equal. Defaults to Equal.
+	// Exists is equivalent to wildcard for value, so that a lease can tolerate all taints of a particular category.
+	// +kubebuilder:validation:Enum=Exists;Equal
+	// +optional
+	Operator TolerationOperator `json:"operator,omitempty"`
+	// Value is the taint value the toleration matches to.
+	// If the operator is Exists, the value should be empty, otherwise just a regular value.
+	// +optional
+	Value string `json:"value,omitempty"`
+	// Effect indicates which taint effect to match. Empty means match all taint effects.
+	// When specified, allowed values are NoSchedule and PreferNoSchedule.
+	// +kubebuilder:validation:Enum=NoSchedule;PreferNoSchedule;""
+	// +optional
+	Effect string `json:"effect,omitempty"`
+}
+
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
@@ -62,6 +95,11 @@ type LeaseSpec struct {
 	// This works like Kubernetes nodeSelector for selecting pools based on labels.
 	// +optional
 	PoolSelector map[string]string `json:"poolSelector,omitempty"`
+
+	// Tolerations are tolerations that allow this lease to be scheduled on pools with matching taints.
+	// This works like Kubernetes pod tolerations for scheduling on nodes with taints.
+	// +optional
+	Tolerations []Toleration `json:"tolerations,omitempty"`
 
 	// NetworkType defines the type of network required by the lease.
 	// by default, all networks are treated as single-tenant. single-tenant networks
