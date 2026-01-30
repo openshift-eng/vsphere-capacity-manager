@@ -94,6 +94,16 @@ func (r *lease) WithProwAnnotations(jobType, jobName string) *lease {
 	return r
 }
 
+func (r *lease) WithPoolSelector(selector map[string]string) *lease {
+	r.lease.Spec.PoolSelector = selector
+	return r
+}
+
+func (r *lease) WithTolerations(tolerations []v1.Toleration) *lease {
+	r.lease.Spec.Tolerations = tolerations
+	return r
+}
+
 func (r *lease) Build() *v1.Lease {
 	return &r.lease
 }

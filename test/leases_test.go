@@ -1198,4 +1198,373 @@ var _ = Describe("Lease management", func() {
 			})
 		})
 	})
+
+	It("should acquire lease with pool selector matching pool labels", func() {
+		var lease *v1.Lease
+
+		By("enabling the us-west pool", func() {
+			pool := &v1.Pool{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Namespace: "default",
+				Name:      "pool-labeled-us-west",
+			}, pool)).To(Succeed())
+			pool.Spec.Exclude = false
+			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+		})
+
+		By("creating a lease with pool selector", func() {
+			lease = GetLease().
+				WithShape(SHAPE_SMALL).
+				WithPoolSelector(map[string]string{
+					"region": "us-west",
+					"tier":   "standard",
+				}).
+				Build()
+			Expect(lease).NotTo(BeNil())
+			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
+				return lease.Status.Phase == v1.PHASE_FULFILLED
+			}).Should(BeTrue())
+			VerifyCondition(lease, v1.LeaseConditionTypeFulfilled, v1.ConditionTrue)
+		})
+
+		By("verifying lease was assigned to correct pool", func() {
+			Eventually(func() bool {
+				result, _ := IsLeaseOwnedByKinds(lease, "Network", "Pool")
+				if !result {
+					return false
+				}
+				// Verify it's assigned to the us-west pool
+				for _, ownerRef := range lease.OwnerReferences {
+					if ownerRef.Kind == "Pool" {
+						return ownerRef.Name == "pool-labeled-us-west"
+					}
+				}
+				return false
+			}).Should(BeTrue())
+		})
+
+		By("deleting the lease", func() {
+			Expect(k8sClient.Delete(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be deleted", func() {
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease) != nil
+			}).Should(BeTrue())
+		})
+
+		By("re-excluding the us-west pool", func() {
+			pool := &v1.Pool{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Namespace: "default",
+				Name:      "pool-labeled-us-west",
+			}, pool)).To(Succeed())
+			pool.Spec.Exclude = true
+			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+		})
+	})
+
+	It("should fail to acquire lease with non-matching pool selector", func() {
+		var lease *v1.Lease
+		By("creating a lease with non-matching pool selector", func() {
+			lease = GetLease().
+				WithShape(SHAPE_SMALL).
+				WithPoolSelector(map[string]string{
+					"region": "us-central",
+					"tier":   "premium",
+				}).
+				Build()
+			Expect(lease).NotTo(BeNil())
+			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be pending with no pools available", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
+				return lease.Status.Phase == v1.PHASE_PENDING
+			}).Should(BeTrue())
+			VerifyCondition(lease, v1.LeaseConditionTypeFulfilled, v1.ConditionFalse)
+		})
+
+		By("deleting the lease", func() {
+			Expect(k8sClient.Delete(ctx, lease)).To(Succeed())
+		})
+	})
+
+	It("should acquire lease with tolerations matching pool taints", func() {
+		var lease *v1.Lease
+
+		By("enabling the tainted-gpu pool", func() {
+			pool := &v1.Pool{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Namespace: "default",
+				Name:      "pool-tainted-gpu",
+			}, pool)).To(Succeed())
+			pool.Spec.Exclude = false
+			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+		})
+
+		By("creating a lease with tolerations", func() {
+			lease = GetLease().
+				WithShape(SHAPE_SMALL).
+				WithTolerations([]v1.Toleration{
+					{
+						Key:      "dedicated",
+						Operator: v1.TolerationOpEqual,
+						Value:    "gpu",
+						Effect:   "NoSchedule",
+					},
+				}).
+				Build()
+			Expect(lease).NotTo(BeNil())
+			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
+				return lease.Status.Phase == v1.PHASE_FULFILLED
+			}).Should(BeTrue())
+			VerifyCondition(lease, v1.LeaseConditionTypeFulfilled, v1.ConditionTrue)
+		})
+
+		By("verifying lease can be assigned to any pool including tainted", func() {
+			Eventually(func() bool {
+				result, _ := IsLeaseOwnedByKinds(lease, "Network", "Pool")
+				return result
+			}).Should(BeTrue())
+		})
+
+		By("deleting the lease", func() {
+			Expect(k8sClient.Delete(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be deleted", func() {
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease) != nil
+			}).Should(BeTrue())
+		})
+
+		By("re-excluding the tainted-gpu pool", func() {
+			pool := &v1.Pool{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Namespace: "default",
+				Name:      "pool-tainted-gpu",
+			}, pool)).To(Succeed())
+			pool.Spec.Exclude = true
+			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+		})
+	})
+
+	It("should prefer non-tainted pools for lease without tolerations", func() {
+		var lease *v1.Lease
+
+		By("enabling the tainted-gpu pool", func() {
+			pool := &v1.Pool{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Namespace: "default",
+				Name:      "pool-tainted-gpu",
+			}, pool)).To(Succeed())
+			pool.Spec.Exclude = false
+			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+		})
+
+		By("creating a lease without tolerations", func() {
+			lease = GetLease().
+				WithShape(SHAPE_SMALL).
+				Build()
+			Expect(lease).NotTo(BeNil())
+			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
+				return lease.Status.Phase == v1.PHASE_FULFILLED
+			}).Should(BeTrue())
+			VerifyCondition(lease, v1.LeaseConditionTypeFulfilled, v1.ConditionTrue)
+		})
+
+		By("verifying lease was not assigned to tainted pool", func() {
+			Eventually(func() bool {
+				result, _ := IsLeaseOwnedByKinds(lease, "Network", "Pool")
+				if !result {
+					return false
+				}
+				// Verify it's NOT assigned to the tainted-gpu pool
+				for _, ownerRef := range lease.OwnerReferences {
+					if ownerRef.Kind == "Pool" {
+						return ownerRef.Name != "pool-tainted-gpu"
+					}
+				}
+				return false
+			}).Should(BeTrue())
+		})
+
+		By("deleting the lease", func() {
+			Expect(k8sClient.Delete(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be deleted", func() {
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease) != nil
+			}).Should(BeTrue())
+		})
+
+		By("re-excluding the tainted-gpu pool", func() {
+			pool := &v1.Pool{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Namespace: "default",
+				Name:      "pool-tainted-gpu",
+			}, pool)).To(Succeed())
+			pool.Spec.Exclude = true
+			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+		})
+	})
+
+	It("should acquire lease with both pool selector and tolerations", func() {
+		var lease *v1.Lease
+
+		By("enabling the tainted-gpu pool", func() {
+			pool := &v1.Pool{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Namespace: "default",
+				Name:      "pool-tainted-gpu",
+			}, pool)).To(Succeed())
+			pool.Spec.Exclude = false
+			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+		})
+
+		By("creating a lease with pool selector and tolerations", func() {
+			lease = GetLease().
+				WithShape(SHAPE_SMALL).
+				WithPoolSelector(map[string]string{
+					"region": "us-west",
+					"tier":   "gpu",
+				}).
+				WithTolerations([]v1.Toleration{
+					{
+						Key:      "dedicated",
+						Operator: v1.TolerationOpEqual,
+						Value:    "gpu",
+						Effect:   "NoSchedule",
+					},
+				}).
+				Build()
+			Expect(lease).NotTo(BeNil())
+			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
+				return lease.Status.Phase == v1.PHASE_FULFILLED
+			}).Should(BeTrue())
+			VerifyCondition(lease, v1.LeaseConditionTypeFulfilled, v1.ConditionTrue)
+		})
+
+		By("verifying lease was assigned to the tainted-gpu pool", func() {
+			Eventually(func() bool {
+				result, _ := IsLeaseOwnedByKinds(lease, "Network", "Pool")
+				if !result {
+					return false
+				}
+				// Verify it's assigned to the tainted-gpu pool
+				for _, ownerRef := range lease.OwnerReferences {
+					if ownerRef.Kind == "Pool" {
+						return ownerRef.Name == "pool-tainted-gpu"
+					}
+				}
+				return false
+			}).Should(BeTrue())
+		})
+
+		By("deleting the lease", func() {
+			Expect(k8sClient.Delete(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be deleted", func() {
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease) != nil
+			}).Should(BeTrue())
+		})
+
+		By("re-excluding the tainted-gpu pool", func() {
+			pool := &v1.Pool{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Namespace: "default",
+				Name:      "pool-tainted-gpu",
+			}, pool)).To(Succeed())
+			pool.Spec.Exclude = true
+			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+		})
+	})
+
+	It("should use wildcard toleration to match all taints", func() {
+		var lease *v1.Lease
+
+		By("enabling the tainted-gpu pool", func() {
+			pool := &v1.Pool{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Namespace: "default",
+				Name:      "pool-tainted-gpu",
+			}, pool)).To(Succeed())
+			pool.Spec.Exclude = false
+			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+		})
+
+		By("creating a lease with wildcard toleration", func() {
+			lease = GetLease().
+				WithShape(SHAPE_SMALL).
+				WithTolerations([]v1.Toleration{
+					{
+						Key:      "",
+						Operator: v1.TolerationOpExists,
+					},
+				}).
+				Build()
+			Expect(lease).NotTo(BeNil())
+			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
+				return lease.Status.Phase == v1.PHASE_FULFILLED
+			}).Should(BeTrue())
+			VerifyCondition(lease, v1.LeaseConditionTypeFulfilled, v1.ConditionTrue)
+		})
+
+		By("verifying lease can be assigned to any pool", func() {
+			Eventually(func() bool {
+				result, _ := IsLeaseOwnedByKinds(lease, "Network", "Pool")
+				return result
+			}).Should(BeTrue())
+		})
+
+		By("deleting the lease", func() {
+			Expect(k8sClient.Delete(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be deleted", func() {
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease) != nil
+			}).Should(BeTrue())
+		})
+
+		By("re-excluding the tainted-gpu pool", func() {
+			pool := &v1.Pool{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Namespace: "default",
+				Name:      "pool-tainted-gpu",
+			}, pool)).To(Succeed())
+			pool.Spec.Exclude = true
+			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+		})
+	})
 })

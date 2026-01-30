@@ -1,0 +1,38 @@
+apiVersion: vsphere-capacity-manager.splat-team.io/v1
+kind: Pool
+metadata:
+  creationTimestamp: null
+  name: pool-tainted-gpu
+  labels:
+    region: us-west
+    tier: gpu
+spec:
+  exclude: true
+  ibmPoolSpec:
+    datacenter: dal10
+    pod: dal10.pod03
+  memory: 2684
+  name: pool-tainted-gpu
+  region: us-west
+  server: test.com
+  storage: 0
+  topology:
+    computeCluster: /IBMCloud/host/vcs-ci-workload
+    datacenter: /IBMCloud
+    datastore: /IBMCloud/datastore/vsanDatastore
+    networks:
+    - /IBMCloud/network/ci-vlan-1302
+    - /IBMCloud/network/ci-vlan-1300
+  vcpus: 240
+  overCommitRatio: "2.5"
+  zone: us-west-1a
+  taints:
+  - key: dedicated
+    value: gpu
+    effect: NoSchedule
+status:
+  datastore-available: 0
+  initialized: false
+  memory-available: 0
+  network-available: 0
+  vcpus-available: 0
