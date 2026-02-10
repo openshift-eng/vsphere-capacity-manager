@@ -14,3 +14,9 @@ rules:
       - networks/status
     verbs:
       - '*'
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - '*'
