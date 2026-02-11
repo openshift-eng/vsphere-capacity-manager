@@ -2,14 +2,14 @@ apiVersion: vspherecapacitymanager.splat.io/v1
 kind: Pool
 metadata:
   creationTimestamp: null
-  name: test.com-IBMCloud-vcs-mdcnc-workload-3
+  name: test.com-ibmcloud-vcs-mdcnc-workload-3
 spec:
   exclude: true
   ibmPoolSpec:
     datacenter: dal10
     pod: dal10.pod03
   memory: 383
-  name: test.com-IBMCloud-vcs-mdcnc-workload-3
+  name: test.com-ibmcloud-vcs-mdcnc-workload-3
   region: us-east
   server: test.com
   storage: 0

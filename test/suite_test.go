@@ -78,14 +78,12 @@ var _ = BeforeSuite(func() {
 			err = yaml.Unmarshal(content, &network)
 			Expect(err).NotTo(HaveOccurred())
 			network.Namespace = "default"
-			network.Name = strings.ToLower(network.Name)
 			networks.Items = append(networks.Items, network)
 		} else if strings.HasPrefix(entry.Name(), "pool-") {
 			pool := v1.Pool{}
 			err = yaml.Unmarshal(content, &pool)
 			Expect(err).NotTo(HaveOccurred())
 			pool.Namespace = "default"
-			pool.Name = strings.ToLower(pool.Name)
 			pools.Items = append(pools.Items, pool)
 		}
 	}
