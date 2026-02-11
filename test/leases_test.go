@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path"
 	"strings"
 	"time"
 
@@ -1565,6 +1566,173 @@ var _ = Describe("Lease management", func() {
 			}, pool)).To(Succeed())
 			pool.Spec.Exclude = true
 			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+		})
+	})
+
+	It("should acquire lease with multiple pools", func() {
+		var lease *v1.Lease
+
+		By("creating a lease requesting 2 pools", func() {
+			lease = GetLease().
+				WithShape(SHAPE_SMALL).
+				WithPools(2).
+				Build()
+			Expect(lease).NotTo(BeNil())
+			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
+				log.Printf("Lease %s phase: %s", lease.Name, lease.Status.Phase)
+				return lease.Status.Phase == v1.PHASE_FULFILLED
+			}, 30*time.Second, 1*time.Second).Should(BeTrue())
+			VerifyCondition(lease, v1.LeaseConditionTypeFulfilled, v1.ConditionTrue)
+		})
+
+		By("verifying lease has 2 pool owner references", func() {
+			Eventually(func() error {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
+				return VerifyMultiPoolLease(lease, 2, lease.Spec.Networks)
+			}).Should(Succeed())
+		})
+
+		By("verifying each pool has unique name", func() {
+			poolNames := make(map[string]bool)
+			for _, ownerRef := range lease.OwnerReferences {
+				if ownerRef.Kind == "Pool" {
+					Expect(poolNames[ownerRef.Name]).To(BeFalse(), "Pool %s should not be duplicated", ownerRef.Name)
+					poolNames[ownerRef.Name] = true
+				}
+			}
+			Expect(len(poolNames)).To(Equal(2), "Should have 2 unique pools")
+		})
+
+		By("verifying envVarsMap has entries for all 2 pools", func() {
+			Expect(lease.Status.EnvVarsMap).NotTo(BeNil())
+			Expect(len(lease.Status.EnvVarsMap)).To(Equal(2), "envVarsMap should have 2 entries")
+
+			// Verify each entry is not empty and contains expected env vars
+			for server, envVars := range lease.Status.EnvVarsMap {
+				Expect(envVars).NotTo(BeEmpty(), "envVars for server %s should not be empty", server)
+				Expect(envVars).To(ContainSubstring("export vsphere_url="), "envVars should contain vsphere_url")
+				Expect(envVars).To(ContainSubstring(server), "envVars should reference the server %s", server)
+			}
+		})
+
+		By("verifying backward compatibility - deprecated status fields are populated from first pool", func() {
+			Expect(lease.Status.EnvVars).NotTo(BeEmpty(), "Deprecated envVars field should still be populated")
+			Expect(lease.Status.Name).NotTo(Equal("pending"), "status.name should not be 'pending'")
+			Expect(lease.Status.Server).NotTo(Equal("pending"), "status.server should not be 'pending'")
+			Expect(lease.Status.Region).NotTo(Equal("pending"), "status.region should not be 'pending'")
+			Expect(lease.Status.Zone).NotTo(Equal("pending"), "status.zone should not be 'pending'")
+			Expect(lease.Status.ShortName).NotTo(Equal("pending"), "status.shortName should not be 'pending'")
+			Expect(lease.Status.Topology.Datacenter).NotTo(Equal("pending"), "status.topology.datacenter should not be 'pending'")
+
+			// Verify backward compat fields match first pool in poolInfo
+			if len(lease.Status.PoolInfo) > 0 {
+				firstPool := lease.Status.PoolInfo[0]
+				Expect(lease.Status.Name).To(Equal(firstPool.Name), "status.name should match first pool")
+				Expect(lease.Status.Server).To(Equal(firstPool.Server), "status.server should match first pool")
+				Expect(lease.Status.Region).To(Equal(firstPool.Region), "status.region should match first pool")
+				Expect(lease.Status.Zone).To(Equal(firstPool.Zone), "status.zone should match first pool")
+				Expect(lease.Status.ShortName).To(Equal(firstPool.ShortName), "status.shortName should match first pool")
+			}
+		})
+
+		By("verifying poolInfo array is populated", func() {
+			Expect(lease.Status.PoolInfo).NotTo(BeNil(), "poolInfo should not be nil")
+			Expect(len(lease.Status.PoolInfo)).To(Equal(2), "poolInfo should have 2 entries")
+
+			// Verify each poolInfo entry has required fields (each is a FailureDomainSpec)
+			poolNamesInPoolInfo := make(map[string]bool)
+			for i, poolFailureDomain := range lease.Status.PoolInfo {
+				log.Printf("PoolInfo[%d]: name=%s, server=%s, region=%s, zone=%s, shortName=%s, networks=%v",
+					i, poolFailureDomain.Name, poolFailureDomain.Server, poolFailureDomain.Region,
+					poolFailureDomain.Zone, poolFailureDomain.ShortName, poolFailureDomain.Topology.Networks)
+
+				Expect(poolFailureDomain.Name).NotTo(BeEmpty(), "poolInfo[%d].name should not be empty", i)
+				Expect(poolFailureDomain.Server).NotTo(BeEmpty(), "poolInfo[%d].server should not be empty", i)
+				Expect(poolFailureDomain.Region).NotTo(BeEmpty(), "poolInfo[%d].region should not be empty", i)
+				Expect(poolFailureDomain.Zone).NotTo(BeEmpty(), "poolInfo[%d].zone should not be empty", i)
+				Expect(poolFailureDomain.ShortName).NotTo(BeEmpty(), "poolInfo[%d].shortName should not be empty", i)
+				Expect(poolFailureDomain.Topology.Datacenter).NotTo(BeEmpty(), "poolInfo[%d].topology.datacenter should not be empty", i)
+
+				// Verify networks in poolInfo.Topology.Networks are only the assigned networks for this pool
+				Expect(len(poolFailureDomain.Topology.Networks)).To(Equal(lease.Spec.Networks),
+					"poolInfo[%d] should have exactly %d networks assigned", i, lease.Spec.Networks)
+
+				poolNamesInPoolInfo[poolFailureDomain.Name] = true
+			}
+
+			// Verify poolInfo matches pool owner references
+			for _, ownerRef := range lease.OwnerReferences {
+				if ownerRef.Kind == "Pool" {
+					Expect(poolNamesInPoolInfo[ownerRef.Name]).To(BeTrue(),
+						"Pool %s should be in poolInfo array", ownerRef.Name)
+				}
+			}
+		})
+
+		By("verifying each pool has the required networks", func() {
+			// Get all pool owner references
+			poolNames := make([]string, 0)
+			for _, ownerRef := range lease.OwnerReferences {
+				if ownerRef.Kind == "Pool" {
+					poolNames = append(poolNames, ownerRef.Name)
+				}
+			}
+
+			// For each pool, count how many networks are assigned
+			for _, poolName := range poolNames {
+				pool := &v1.Pool{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Namespace: "default",
+					Name:      poolName,
+				}, pool)).To(Succeed())
+
+				// Count networks for this pool
+				networkCount := 0
+				poolNetworks := make(map[string]*v1.Network)
+
+				// Get networks available in this pool
+				for _, portGroupPath := range pool.Spec.Topology.Networks {
+					_, networkName := path.Split(portGroupPath)
+
+					allNetworks := &v1.NetworkList{}
+					Expect(k8sClient.List(ctx, allNetworks)).To(Succeed())
+
+					for _, network := range allNetworks.Items {
+						if network.Spec.PortGroupName == networkName {
+							poolNetworks[network.Name] = &network
+							break
+						}
+					}
+				}
+
+				// Count how many of the lease's network owner references are in this pool
+				for _, ownerRef := range lease.OwnerReferences {
+					if ownerRef.Kind == "Network" {
+						if _, exists := poolNetworks[ownerRef.Name]; exists {
+							networkCount++
+						}
+					}
+				}
+
+				log.Printf("Pool %s has %d networks assigned (expected %d)", poolName, networkCount, lease.Spec.Networks)
+				Expect(networkCount).To(Equal(lease.Spec.Networks),
+					"Pool %s should have %d networks", poolName, lease.Spec.Networks)
+			}
+		})
+
+		By("deleting the lease", func() {
+			Expect(k8sClient.Delete(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be deleted", func() {
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease) != nil
+			}).Should(BeTrue())
 		})
 	})
 })

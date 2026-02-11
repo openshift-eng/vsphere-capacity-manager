@@ -118,11 +118,28 @@ type LeaseSpec struct {
 
 // LeaseStatus defines the status for a lease
 type LeaseStatus struct {
+	// Deprecated: The inline FailureDomainSpec fields (name, server, region, zone, topology, shortName)
+	// are deprecated for multi-pool leases. Use PoolInfo instead, which provides this information
+	// for each assigned pool. For backward compatibility, these fields are populated from the first pool.
 	FailureDomainSpec `json:",inline"`
+
+	// PoolInfo contains FailureDomainSpec for each pool assigned to this lease.
+	// For multi-pool leases, this array will have multiple entries.
+	// Each entry contains name, server, region, zone, topology, and shortName for a pool.
+	// +optional
+	PoolInfo []FailureDomainSpec `json:"poolInfo,omitempty"`
 
 	// EnvVars a freeform string which contains bash which is to be sourced
 	// by the holder of the lease.
+	// Deprecated: Use EnvVarsMap instead for multi-pool leases
+	// +optional
 	EnvVars string `json:"envVars,omitempty"`
+
+	// EnvVarsMap contains environment variables for each vCenter server.
+	// The key is the vCenter server name and the value is the bash script to be sourced.
+	// This field supports multi-pool leases where each pool may be on a different vCenter.
+	// +optional
+	EnvVarsMap map[string]string `json:"envVarsMap,omitempty"`
 
 	// Phase is the current phase of the lease
 	// +optional

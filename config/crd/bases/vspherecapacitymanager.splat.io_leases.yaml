@@ -191,9 +191,18 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               envVars:
-                description: EnvVars a freeform string which contains bash which is
-                  to be sourced by the holder of the lease.
+                description: 'EnvVars a freeform string which contains bash which
+                  is to be sourced by the holder of the lease. Deprecated: Use EnvVarsMap
+                  instead for multi-pool leases'
                 type: string
+              envVarsMap:
+                additionalProperties:
+                  type: string
+                description: EnvVarsMap contains environment variables for each vCenter
+                  server. The key is the vCenter server name and the value is the
+                  bash script to be sourced. This field supports multi-pool leases
+                  where each pool may be on a different vCenter.
+                type: object
               job-link:
                 description: JobLink defines a link to the job that owns this lease.  Its
                   primarily used when debugging issues w/ lease management.
@@ -207,6 +216,129 @@ spec:
               phase:
                 description: Phase is the current phase of the lease
                 type: string
+              poolInfo:
+                description: PoolInfo contains FailureDomainSpec for each pool assigned
+                  to this lease. For multi-pool leases, this array will have multiple
+                  entries. Each entry contains name, server, region, zone, topology,
+                  and shortName for a pool.
+                items:
+                  description: FailureDomainSpec extends VSpherePlatformFailureDomainSpec
+                    to add additional features for VCM
+                  properties:
+                    name:
+                      description: name defines the arbitrary but unique name of a
+                        failure domain.
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                    region:
+                      description: region defines the name of a region tag that will
+                        be attached to a vCenter datacenter. The tag category in vCenter
+                        must be named openshift-region.
+                      maxLength: 80
+                      minLength: 1
+                      type: string
+                    server:
+                      description: server is the fully-qualified domain name or the
+                        IP address of the vCenter server. ---
+                      maxLength: 255
+                      minLength: 1
+                      type: string
+                    shortName:
+                      description: ShortName a short name to be used by CI and other
+                        services that need to limit max length of failure domain name
+                      maxLength: 30
+                      minLength: 1
+                      pattern: ^[a-zA-Z0-9]([-_a-zA-Z0-9]*[a-zA-Z0-9])?$
+                      type: string
+                    topology:
+                      description: Topology describes a given failure domain using
+                        vSphere constructs
+                      properties:
+                        computeCluster:
+                          description: computeCluster the absolute path of the vCenter
+                            cluster in which virtual machine will be located. The
+                            absolute path is of the form /<datacenter>/host/<cluster>.
+                            The maximum length of the path is 2048 characters.
+                          maxLength: 2048
+                          pattern: ^/.*?/host/.*?
+                          type: string
+                        datacenter:
+                          description: datacenter is the name of vCenter datacenter
+                            in which virtual machines will be located. The maximum
+                            length of the datacenter name is 80 characters.
+                          maxLength: 80
+                          type: string
+                        datastore:
+                          description: datastore is the absolute path of the datastore
+                            in which the virtual machine is located. The absolute
+                            path is of the form /<datacenter>/datastore/<datastore>
+                            The maximum length of the path is 2048 characters.
+                          maxLength: 2048
+                          pattern: ^/.*?/datastore/.*?
+                          type: string
+                        folder:
+                          description: folder is the absolute path of the folder where
+                            virtual machines are located. The absolute path is of
+                            the form /<datacenter>/vm/<folder>. The maximum length
+                            of the path is 2048 characters.
+                          maxLength: 2048
+                          pattern: ^/.*?/vm/.*?
+                          type: string
+                        networks:
+                          description: networks is the list of port group network
+                            names within this failure domain. Currently, we only support
+                            a single interface per RHCOS virtual machine. The available
+                            networks (port groups) can be listed using `govc ls 'network/*'`
+                            The single interface should be the absolute path of the
+                            form /<datacenter>/network/<portgroup>.
+                          items:
+                            type: string
+                          minItems: 1
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        resourcePool:
+                          description: resourcePool is the absolute path of the resource
+                            pool where virtual machines will be created. The absolute
+                            path is of the form /<datacenter>/host/<cluster>/Resources/<resourcepool>.
+                            The maximum length of the path is 2048 characters.
+                          maxLength: 2048
+                          pattern: ^/.*?/host/.*?/Resources.*
+                          type: string
+                        template:
+                          description: "template is the full inventory path of the
+                            virtual machine or template that will be cloned when creating
+                            new machines in this failure domain. The maximum length
+                            of the path is 2048 characters. \n When omitted, the template
+                            will be calculated by the control plane machineset operator
+                            based on the region and zone defined in VSpherePlatformFailureDomainSpec.
+                            For example, for zone=zonea, region=region1, and infrastructure
+                            name=test, the template path would be calculated as /<datacenter>/vm/test-rhcos-region1-zonea."
+                          maxLength: 2048
+                          minLength: 1
+                          pattern: ^/.*?/vm/.*?
+                          type: string
+                      required:
+                      - computeCluster
+                      - datacenter
+                      - datastore
+                      - networks
+                      type: object
+                    zone:
+                      description: zone defines the name of a zone tag that will be
+                        attached to a vCenter cluster. The tag category in vCenter
+                        must be named openshift-zone.
+                      maxLength: 80
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  - region
+                  - server
+                  - topology
+                  - zone
+                  type: object
+                type: array
               region:
                 description: region defines the name of a region tag that will be
                   attached to a vCenter datacenter. The tag category in vCenter must

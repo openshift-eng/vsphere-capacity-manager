@@ -146,6 +146,20 @@ func (in *LeaseSpec) DeepCopy() *LeaseSpec {
 func (in *LeaseStatus) DeepCopyInto(out *LeaseStatus) {
 	*out = *in
 	in.FailureDomainSpec.DeepCopyInto(&out.FailureDomainSpec)
+	if in.PoolInfo != nil {
+		in, out := &in.PoolInfo, &out.PoolInfo
+		*out = make([]FailureDomainSpec, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.EnvVarsMap != nil {
+		in, out := &in.EnvVarsMap, &out.EnvVarsMap
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]Condition, len(*in))

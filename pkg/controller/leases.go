@@ -607,10 +607,51 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		v1.LeaseConditionTypeDelayed,
 	))
 
-	pool := &v1.Pool{}
-	if ref := utils.DoesLeaseHavePool(lease); ref == nil {
-		pool, err = utils.GetPoolWithStrategy(lease, updatedPools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
+	// Determine how many pools are required
+	requiredPools := lease.Spec.Pools
+	if requiredPools == 0 {
+		requiredPools = 1 // default to 1 pool
+	}
+
+	// Get all currently assigned pools
+	assignedPoolRefs := utils.GetLeasePoolRefs(lease)
+	assignedPools := make([]*v1.Pool, 0, len(assignedPoolRefs))
+	assignedPoolNames := make(map[string]bool)
+	for _, poolRef := range assignedPoolRefs {
+		pool := &v1.Pool{}
+		err = l.Get(ctx, types.NamespacedName{
+			Namespace: req.Namespace,
+			Name:      poolRef.Name,
+		}, pool)
 		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("error getting assigned pool %s: %v", poolRef.Name, err)
+		}
+		assignedPools = append(assignedPools, pool)
+		assignedPoolNames[pool.Name] = true
+	}
+
+	// Assign additional pools if needed
+	log.Printf("Lease %s requires %d pools, currently has %d pools assigned", lease.Name, requiredPools, len(assignedPools))
+	for len(assignedPools) < requiredPools {
+		// Filter out already assigned pools
+		availablePools := make([]*v1.Pool, 0)
+		for _, p := range updatedPools {
+			if !assignedPoolNames[p.Name] {
+				availablePools = append(availablePools, p)
+			}
+		}
+
+		log.Printf("Attempting to assign pool %d/%d for lease %s, %d pools available after filtering", len(assignedPools)+1, requiredPools, lease.Name, len(availablePools))
+		log.Printf("Lease %s currently has %d owner references before GetPoolWithStrategy", lease.Name, len(lease.OwnerReferences))
+
+		pool, err := utils.GetPoolWithStrategy(lease, availablePools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
+		if err != nil {
+			// If we already have some pools assigned, mark as partial
+			if len(assignedPools) > 0 {
+				log.Printf("lease %s needs %d pools but only %d available", lease.Name, requiredPools, len(assignedPools))
+				break
+			}
+
 			conditions.Set(lease, conditions.FalseConditionWithReason(
 				v1.LeaseConditionTypeFulfilled,
 				v1.ReasonLeaseNoPool,
@@ -626,86 +667,269 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			updateLeaseMetrics()
 			return ctrl.Result{}, fmt.Errorf("unable to get matching pool: %v", err)
 		}
-	} else {
-		err = l.Get(ctx, types.NamespacedName{
-			Namespace: req.Namespace,
-			Name:      ref.Name,
-		}, pool)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("error getting pool: %v", err)
-		}
-	}
 
-	var network *v1.Network
+		log.Printf("Lease %s now has %d owner references after GetPoolWithStrategy", lease.Name, len(lease.OwnerReferences))
+		assignedPools = append(assignedPools, pool)
+		assignedPoolNames[pool.Name] = true
+		log.Printf("assigned pool %s to lease %s (%d/%d pools)", pool.Name, lease.Name, len(assignedPools), requiredPools)
 
-	if !utils.DoesLeaseHaveNetworks(lease) {
-		log.Printf("Searching for networks to assign to lease %v", lease.Name)
-		var availableNetworks []*v1.Network
-		availableNetworks, err = l.getCommonNetworksForLease(lease)
-		if err != nil {
-			log.Printf("error getting common network for lease, will attempt to allocate a new one: %v", err)
-
-			availableNetworks = l.getAvailableNetworks(pool, lease.Spec.NetworkType)
-
-			// We can allow multi-tenant leases to use single-tenant networks if there are not enough multi-tenant leases.
-			if l.AllowMultiToUseSingle && lease.Spec.NetworkType == v1.NetworkTypeMultiTenant {
-				// for mutli-tenant leases, there is no reason they can't fall back to single-tenant if there aren't
-				// any multi-tenant leases available.
-				log.Println("Adding single tenant to multi tenant collection...")
-				availableNetworks = append(availableNetworks, l.getAvailableNetworks(pool, v1.NetworkTypeSingleTenant)...)
-			}
-		} else {
-			log.Printf("getCommonNetworkForLease for lease %v returned %d leases", lease.Name, len(availableNetworks))
-		}
-
-		log.Printf("available networks: %d - lease %s requested %d networks and current has %d assigned", len(availableNetworks), lease.Name, lease.Spec.Networks, len(lease.Status.Topology.Networks))
-
-		// If we do not have enough networks, lets assign the ones we do have and assign additional when they become available to prevent starvation.
-		if len(availableNetworks) == 0 {
-			return ctrl.Result{}, fmt.Errorf("lease requires %d networks, %d networks available", lease.Spec.Networks, len(availableNetworks))
-		}
-
-		// Set networks to equal current ones in status
-		var networks []string
-		if len(lease.Status.Topology.Networks) != 0 && lease.Status.Topology.Networks[0] != "/pending/network/pending" {
-			networks = lease.Status.Topology.Networks
-		}
-
-		// shuffle available networks
-		rand.Shuffle(len(availableNetworks), func(i, j int) {
-			availableNetworks[i], availableNetworks[j] = availableNetworks[j], availableNetworks[i]
-		})
-
-		for idx := 0; idx+len(lease.Status.Topology.Networks) < lease.Spec.Networks && idx < len(availableNetworks); idx++ {
-			if !doesLeaseContainPortGroup(lease, pool, availableNetworks[idx]) {
-				network = availableNetworks[idx]
-				lease.OwnerReferences = append(lease.OwnerReferences, metav1.OwnerReference{
-					APIVersion: network.APIVersion,
-					Kind:       network.Kind,
-					Name:       network.Name,
-					UID:        network.UID,
-				})
-				networks = append(networks, fmt.Sprintf("/%s/network/%s", lease.Status.Topology.Datacenter, network.Spec.PortGroupName))
+		// Log all pool owner references
+		poolCount := 0
+		for _, ref := range lease.OwnerReferences {
+			if ref.Kind == "Pool" {
+				poolCount++
+				log.Printf("  Pool owner ref %d: %s", poolCount, ref.Name)
 			}
 		}
-		if len(networks) != lease.Spec.Networks {
-			log.Printf("%s requested more than one network, but only %d have been assigned", lease.Name, len(networks))
-		}
-		lease.Status.Topology.Networks = networks
 	}
 
-	// This is currently setting last network as env.  I believe it shouldn't matter, but may want to use the first one.
-	if network != nil {
-		log.Printf("Generating env vars for lease %v with pool %v and network %v", lease.Name, pool.Name, network.Name)
-		err = utils.GenerateEnvVars(lease, pool, network)
-		if err != nil {
-			log.Printf("error generating env vars: %v", err)
+	log.Printf("Finished assigning pools for lease %s: %d pools assigned, %d total owner references", lease.Name, len(assignedPools), len(lease.OwnerReferences))
+
+	// Use the first pool for backward compatibility with status fields
+	pool := assignedPools[0]
+
+	// Populate backward compatibility fields from the first pool
+	pool.Spec.FailureDomainSpec.DeepCopyInto(&lease.Status.FailureDomainSpec)
+	// Networks will be populated later
+	lease.Status.Topology.Networks = []string{}
+	log.Printf("Set backward compatibility fields from first pool %s", pool.Name)
+
+	// Populate poolInfo array with FailureDomainSpec from each assigned pool
+	lease.Status.PoolInfo = make([]v1.FailureDomainSpec, 0, len(assignedPools))
+	for _, poolItem := range assignedPools {
+		// Get networks available in this pool
+		poolNetworksMap := getNetworksForPool(poolItem)
+
+		// Find networks assigned to this lease for this specific pool
+		assignedNetworks := []string{}
+		for _, ownerRef := range lease.OwnerReferences {
+			if ownerRef.Kind == "Network" {
+				if net, exists := poolNetworksMap[ownerRef.Name]; exists {
+					// This network belongs to this pool and is assigned to the lease
+					networkPath := fmt.Sprintf("/%s/network/%s", poolItem.Spec.Topology.Datacenter, net.Spec.PortGroupName)
+					assignedNetworks = append(assignedNetworks, networkPath)
+				}
+			}
+		}
+
+		// Create a copy of the FailureDomainSpec from the pool
+		poolFailureDomain := poolItem.Spec.FailureDomainSpec
+		// Update the topology with only assigned networks
+		poolFailureDomain.Topology.Networks = assignedNetworks
+
+		lease.Status.PoolInfo = append(lease.Status.PoolInfo, poolFailureDomain)
+		log.Printf("Added pool info for pool %s to lease %s with %d networks", poolItem.Name, lease.Name, len(assignedNetworks))
+	}
+
+	// Initialize EnvVarsMap if needed
+	if lease.Status.EnvVarsMap == nil {
+		lease.Status.EnvVarsMap = make(map[string]string)
+	}
+
+	// Each pool needs the FULL number of networks (not divided)
+	// Networks must be "common" across pools (same VLANs) to allow VM communication
+	networksPerPool := lease.Spec.Networks
+	totalNetworksNeeded := networksPerPool * requiredPools
+
+	// Track which VLANs/port groups we've assigned across pools
+	// Key: VLAN ID, Value: list of network names (one per pool)
+	vlanToNetworks := make(map[string][]string)
+
+	// Build map of existing VLAN assignments from current owner references
+	for _, ownerRef := range lease.OwnerReferences {
+		if ownerRef.Kind == "Network" {
+			for _, net := range networks {
+				if net.Name == ownerRef.Name && net.Spec.VlanId != "" {
+					vlanToNetworks[net.Spec.VlanId] = append(vlanToNetworks[net.Spec.VlanId], net.Name)
+					break
+				}
+			}
 		}
 	}
 
-	// If all networks have been assigned, lets mark lease as Fulfilled, else the phase will be partial
-	log.Printf("Lease %v has %d networks assigned: %v", lease.Name, len(lease.Status.Topology.Networks), lease.Status.Topology.Networks)
-	if len(lease.Status.Topology.Networks) == lease.Spec.Networks {
+	log.Printf("Lease %v needs %d pools × %d networks = %d total networks", lease.Name, requiredPools, networksPerPool, totalNetworksNeeded)
+
+	// Process each pool and assign networks
+	for poolIdx, currentPool := range assignedPools {
+		// Get networks available in this pool
+		poolNetworksMap := getNetworksForPool(currentPool)
+
+		// Count how many networks this pool already has
+		poolNetworkCount := 0
+		for _, ownerRef := range lease.OwnerReferences {
+			if ownerRef.Kind == "Network" {
+				if _, exists := poolNetworksMap[ownerRef.Name]; exists {
+					poolNetworkCount++
+				}
+			}
+		}
+
+		log.Printf("Pool %v (%d/%d) currently has %d/%d networks", currentPool.Name, poolIdx+1, requiredPools, poolNetworkCount, networksPerPool)
+
+		// Assign networks to this pool if needed
+		if poolNetworkCount < networksPerPool {
+			log.Printf("Searching for networks to assign to pool %v for lease %v", currentPool.Name, lease.Name)
+
+			// First, try to get common networks (for cross-pool communication)
+			var availableNetworks []*v1.Network
+			availableNetworks, err = l.getCommonNetworksForLease(lease)
+			if err != nil {
+				log.Printf("error getting common network for lease, will attempt to allocate new networks: %v", err)
+
+				availableNetworks = l.getAvailableNetworks(currentPool, lease.Spec.NetworkType)
+
+				// We can allow multi-tenant leases to use single-tenant networks if there are not enough multi-tenant leases.
+				if l.AllowMultiToUseSingle && lease.Spec.NetworkType == v1.NetworkTypeMultiTenant {
+					log.Println("Adding single tenant networks to multi-tenant collection...")
+					availableNetworks = append(availableNetworks, l.getAvailableNetworks(currentPool, v1.NetworkTypeSingleTenant)...)
+				}
+			}
+
+			log.Printf("Found %d available networks for pool %s", len(availableNetworks), currentPool.Name)
+
+			// shuffle available networks
+			rand.Shuffle(len(availableNetworks), func(i, j int) {
+				availableNetworks[i], availableNetworks[j] = availableNetworks[j], availableNetworks[i]
+			})
+
+			// For the first pool, we assign networks and track their VLANs
+			// For subsequent pools, we try to match VLANs from the first pool
+			if poolIdx == 0 {
+				// First pool: assign any available networks
+				for idx := 0; poolNetworkCount < networksPerPool && idx < len(availableNetworks); idx++ {
+					network := availableNetworks[idx]
+					if !doesLeaseContainPortGroup(lease, currentPool, network) {
+						lease.OwnerReferences = append(lease.OwnerReferences, metav1.OwnerReference{
+							APIVersion: network.APIVersion,
+							Kind:       network.Kind,
+							Name:       network.Name,
+							UID:        network.UID,
+						})
+						vlanToNetworks[network.Spec.VlanId] = append(vlanToNetworks[network.Spec.VlanId], network.Name)
+						poolNetworkCount++
+						log.Printf("Assigned network %s (VLAN %s) to pool %s", network.Name, network.Spec.VlanId, currentPool.Name)
+					}
+				}
+			} else {
+				// Subsequent pools: match VLANs from first pool
+				for vlanId := range vlanToNetworks {
+					if poolNetworkCount >= networksPerPool {
+						break
+					}
+
+					// Find a network in this pool with matching VLAN
+					for _, network := range availableNetworks {
+						if network.Spec.VlanId == vlanId && !doesLeaseContainPortGroup(lease, currentPool, network) {
+							// Check if network is available in this pool
+							if _, exists := poolNetworksMap[network.Name]; exists {
+								lease.OwnerReferences = append(lease.OwnerReferences, metav1.OwnerReference{
+									APIVersion: network.APIVersion,
+									Kind:       network.Kind,
+									Name:       network.Name,
+									UID:        network.UID,
+								})
+								vlanToNetworks[vlanId] = append(vlanToNetworks[vlanId], network.Name)
+								poolNetworkCount++
+								log.Printf("Assigned network %s (VLAN %s) to pool %s to match VLAN from first pool", network.Name, vlanId, currentPool.Name)
+								break
+							}
+						}
+					}
+				}
+			}
+
+			if poolNetworkCount < networksPerPool {
+				log.Printf("Warning: Pool %s only has %d/%d networks assigned", currentPool.Name, poolNetworkCount, networksPerPool)
+			}
+		}
+
+		// Generate env vars for this pool
+		// Find any network assigned to this pool to use for env var generation
+		var networkForEnvVars *v1.Network
+		for _, ownerRef := range lease.OwnerReferences {
+			if ownerRef.Kind == "Network" {
+				if net, exists := poolNetworksMap[ownerRef.Name]; exists {
+					networkForEnvVars = net
+					break
+				}
+			}
+		}
+
+		if networkForEnvVars != nil {
+			log.Printf("Generating env vars for lease %v with pool %v and network %v", lease.Name, currentPool.Name, networkForEnvVars.Name)
+			err = utils.GenerateEnvVars(lease, currentPool, networkForEnvVars)
+			if err != nil {
+				log.Printf("error generating env vars: %v", err)
+			}
+		}
+	}
+
+	// Build the status.topology.networks list (using first pool's datacenter for the path)
+	var allNetworks []string
+	for _, ownerRef := range lease.OwnerReferences {
+		if ownerRef.Kind == "Network" {
+			for _, net := range networks {
+				if net.Name == ownerRef.Name {
+					// Only add each unique port group once (even if multiple pools use same VLAN)
+					networkPath := fmt.Sprintf("/%s/network/%s", pool.Spec.Topology.Datacenter, net.Spec.PortGroupName)
+					// Check if already added
+					alreadyAdded := false
+					for _, existing := range allNetworks {
+						if existing == networkPath {
+							alreadyAdded = true
+							break
+						}
+					}
+					if !alreadyAdded {
+						allNetworks = append(allNetworks, networkPath)
+					}
+					break
+				}
+			}
+		}
+	}
+
+	lease.Status.Topology.Networks = allNetworks
+	log.Printf("Lease %v has %d total network owner references, %d unique networks in status", lease.Name, len(vlanToNetworks), len(allNetworks))
+
+	// Check if all pools and networks have been assigned
+	// Each pool must have the full number of networks
+	poolsFulfilled := len(assignedPools) >= requiredPools
+
+	// Count networks per pool to verify each pool has required networks
+	networksPerPoolActual := make(map[string]int)
+	for _, currentPool := range assignedPools {
+		poolNetworksMap := getNetworksForPool(currentPool)
+		count := 0
+		for _, ownerRef := range lease.OwnerReferences {
+			if ownerRef.Kind == "Network" {
+				if _, exists := poolNetworksMap[ownerRef.Name]; exists {
+					count++
+				}
+			}
+		}
+		networksPerPoolActual[currentPool.Name] = count
+	}
+
+	// Check if all pools have required networks
+	allPoolsHaveNetworks := true
+	minNetworksAssigned := lease.Spec.Networks
+	for poolName, count := range networksPerPoolActual {
+		if count < lease.Spec.Networks {
+			allPoolsHaveNetworks = false
+			log.Printf("Pool %s only has %d/%d networks", poolName, count, lease.Spec.Networks)
+		}
+		if count < minNetworksAssigned {
+			minNetworksAssigned = count
+		}
+	}
+
+	networksFulfilled := poolsFulfilled && allPoolsHaveNetworks
+
+	log.Printf("Lease %v has %d/%d pools, each pool needs %d networks, min networks per pool: %d",
+		lease.Name, len(assignedPools), requiredPools, lease.Spec.Networks, minNetworksAssigned)
+
+	if poolsFulfilled && networksFulfilled {
 		lease.Status.Phase = v1.PHASE_FULFILLED
 
 		conditions.Set(lease, conditions.TrueCondition(
@@ -722,11 +946,22 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		conditions.Set(lease, conditions.FalseCondition(
 			v1.LeaseConditionTypePending,
 		))
+
+		var reason string
+		if !poolsFulfilled {
+			reason = fmt.Sprintf("lease is currently assigned %d of %d pools", len(assignedPools), requiredPools)
+		} else if !allPoolsHaveNetworks {
+			reason = fmt.Sprintf("pools do not all have required networks (need %d networks per pool, minimum assigned: %d)",
+				lease.Spec.Networks, minNetworksAssigned)
+		} else {
+			reason = fmt.Sprintf("lease is partially fulfilled")
+		}
+
 		conditions.Set(lease, conditions.FalseConditionWithReason(
 			v1.LeaseConditionTypeFulfilled,
 			v1.ReasonLeasePartial,
 			v1.ConditionSeverityInfo,
-			fmt.Sprintf("lease is currently assigned %v of %v networks", len(lease.Status.Topology.Networks), lease.Spec.Networks),
+			reason,
 		))
 		conditions.Set(lease, conditions.TrueCondition(
 			v1.LeaseConditionTypePartial,

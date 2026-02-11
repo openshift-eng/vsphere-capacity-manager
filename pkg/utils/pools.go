@@ -100,6 +100,19 @@ func GetFittingPools(lease *v1.Lease, pools []*v1.Pool) ([]*v1.Pool, []*PoolFitt
 	poolResults := []*PoolFittingInfo{}
 
 	for _, pool := range pools {
+		// Check if this pool is already owned by the lease
+		alreadyOwned := false
+		for _, ownerRef := range lease.OwnerReferences {
+			if ownerRef.Kind == "Pool" && ownerRef.Name == pool.Name {
+				alreadyOwned = true
+				break
+			}
+		}
+		if alreadyOwned {
+			poolResults = append(poolResults, &PoolFittingInfo{Pool: pool, MatchResults: "Pool already assigned to lease"})
+			continue
+		}
+
 		if pool.Spec.NoSchedule {
 			poolResults = append(poolResults, &PoolFittingInfo{Pool: pool, MatchResults: PoolNotSchedulable})
 			continue
@@ -182,17 +195,24 @@ func GetPoolWithStrategy(lease *v1.Lease, pools []*v1.Pool, strategy v1.Allocati
 		fallthrough
 	default:
 		pool := fittingPools[0]
-		lease.OwnerReferences = append(lease.OwnerReferences, metav1.OwnerReference{
-			APIVersion: pool.APIVersion,
-			Kind:       pool.Kind,
-			Name:       pool.Name,
-			UID:        pool.UID,
-		})
-		pool.Spec.FailureDomainSpec.DeepCopyInto(
-			&lease.Status.FailureDomainSpec)
 
-		// drop the networks from the topology. networks will be assigned in a later step.
-		lease.Status.Topology.Networks = []string{}
+		// Check if this pool is already an owner reference
+		alreadyOwner := false
+		for _, ref := range lease.OwnerReferences {
+			if ref.Kind == "Pool" && ref.Name == pool.Name {
+				alreadyOwner = true
+				break
+			}
+		}
+
+		if !alreadyOwner {
+			lease.OwnerReferences = append(lease.OwnerReferences, metav1.OwnerReference{
+				APIVersion: pool.APIVersion,
+				Kind:       pool.Kind,
+				Name:       pool.Name,
+				UID:        pool.UID,
+			})
+		}
 
 		return pool, nil
 	}

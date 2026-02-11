@@ -104,6 +104,11 @@ func (r *lease) WithTolerations(tolerations []v1.Toleration) *lease {
 	return r
 }
 
+func (r *lease) WithPools(poolCount int) *lease {
+	r.lease.Spec.Pools = poolCount
+	return r
+}
+
 func (r *lease) Build() *v1.Lease {
 	return &r.lease
 }
@@ -128,6 +133,61 @@ func IsLeaseOwnedByKinds(lease *v1.Lease, kinds ...string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// VerifyMultiPoolLease checks if a lease has the expected number of pool owner references
+// and that each pool has environment variables in the envVarsMap
+func VerifyMultiPoolLease(lease *v1.Lease, expectedPools int, expectedNetworksPerPool int) error {
+	if lease.Status.Phase != v1.PHASE_FULFILLED {
+		return fmt.Errorf("lease %s has not been fulfilled, current phase: %s", lease.Name, lease.Status.Phase)
+	}
+
+	// Count pool owner references
+	poolRefs := make(map[string]bool)
+	for _, ownerRef := range lease.OwnerReferences {
+		if ownerRef.Kind == "Pool" {
+			if poolRefs[ownerRef.Name] {
+				return fmt.Errorf("duplicate pool owner reference found: %s", ownerRef.Name)
+			}
+			poolRefs[ownerRef.Name] = true
+		}
+	}
+
+	if len(poolRefs) != expectedPools {
+		return fmt.Errorf("expected %d pool owner references, found %d", expectedPools, len(poolRefs))
+	}
+
+	// Verify envVarsMap has entries for each pool
+	if lease.Status.EnvVarsMap == nil {
+		return fmt.Errorf("envVarsMap is nil")
+	}
+
+	if len(lease.Status.EnvVarsMap) != expectedPools {
+		return fmt.Errorf("expected %d entries in envVarsMap, found %d", expectedPools, len(lease.Status.EnvVarsMap))
+	}
+
+	// Verify each entry in envVarsMap is not empty
+	for server, envVars := range lease.Status.EnvVarsMap {
+		if envVars == "" {
+			return fmt.Errorf("envVarsMap entry for server %s is empty", server)
+		}
+	}
+
+	// Count network owner references
+	networkCount := 0
+	for _, ownerRef := range lease.OwnerReferences {
+		if ownerRef.Kind == "Network" {
+			networkCount++
+		}
+	}
+
+	// In test environments, pools may share networks, so we need at least expectedNetworksPerPool
+	// but may have up to expectedPools * expectedNetworksPerPool
+	if networkCount < expectedNetworksPerPool {
+		return fmt.Errorf("expected at least %d network owner references, found %d", expectedNetworksPerPool, networkCount)
+	}
+
+	return nil
 }
 
 func VerifyCondition(lease *v1.Lease, conditionType v1.ConditionType, status v1.ConditionStatus) bool {
