@@ -1,4 +1,4 @@
-apiVersion: vsphere-capacity-manager.splat-team.io/v1
+apiVersion: vspherecapacitymanager.splat.io/v1
 kind: Pool
 metadata:
   creationTimestamp: null
