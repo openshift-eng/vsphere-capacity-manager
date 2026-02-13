@@ -954,7 +954,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			reason = fmt.Sprintf("pools do not all have required networks (need %d networks per pool, minimum assigned: %d)",
 				lease.Spec.Networks, minNetworksAssigned)
 		} else {
-			reason = fmt.Sprintf("lease is partially fulfilled")
+			reason = "lease is partially fulfilled"
 		}
 
 		conditions.Set(lease, conditions.FalseConditionWithReason(
