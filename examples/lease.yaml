@@ -6,5 +6,6 @@ metadata:
 spec:
   vcpus: 24
   memory: 96
+  pools: 3
   networks: 1
   storage: 2000

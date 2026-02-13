@@ -1,0 +1,34 @@
+apiVersion: vspherecapacitymanager.splat.io/v1
+kind: Pool
+metadata:
+  creationTimestamp: null
+  name: pool-labeled-us-east
+  labels:
+    region: us-east
+    tier: standard
+spec:
+  exclude: true
+  ibmPoolSpec:
+    datacenter: dal10
+    pod: dal10.pod03
+  memory: 2684
+  name: pool-labeled-us-east
+  region: us-east
+  server: test.com
+  storage: 0
+  topology:
+    computeCluster: /IBMCloud/host/vcs-ci-workload
+    datacenter: /IBMCloud
+    datastore: /IBMCloud/datastore/vsanDatastore
+    networks:
+    - /IBMCloud/network/ci-vlan-1289
+    - /IBMCloud/network/ci-vlan-1287
+  vcpus: 240
+  overCommitRatio: "2.5"
+  zone: us-east-1a
+status:
+  datastore-available: 0
+  initialized: false
+  memory-available: 0
+  network-available: 0
+  vcpus-available: 0

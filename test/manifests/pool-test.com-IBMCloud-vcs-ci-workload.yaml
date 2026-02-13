@@ -1,15 +1,15 @@
-apiVersion: vsphere-capacity-manager.splat-team.io/v1
+apiVersion: vspherecapacitymanager.splat.io/v1
 kind: Pool
 metadata:
   creationTimestamp: null
-  name: test.com-IBMCloud-vcs-ci-workload
+  name: test.com-ibmcloud-vcs-ci-workload
 spec:
   exclude: false
   ibmPoolSpec:
     datacenter: dal10
     pod: dal10.pod03
   memory: 2684
-  name: test.com-IBMCloud-vcs-ci-workload
+  name: test.com-ibmcloud-vcs-ci-workload
   region: us-east
   server: test.com
   storage: 0

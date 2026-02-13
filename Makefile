@@ -20,10 +20,12 @@ ENVTEST = go run ${PROJECT_DIR}/vendor/sigs.k8s.io/controller-runtime/tools/setu
 GINKGO = go run ${PROJECT_DIR}/vendor/github.com/onsi/ginkgo/v2/ginkgo
 GOLANGCI_LINT = go run ${PROJECT_DIR}/vendor/github.com/golangci/golangci-lint/cmd/golangci-lint
 
-VERSION     ?= $(shell git describe --always --abbrev=7)
-MUTABLE_TAG ?= latest
-IMAGE       ?= cluster-control-plane-machine-set-operator
-BUILD_IMAGE ?= registry.ci.openshift.org/openshift/release:golang-1.21
+VERSION        ?= $(shell git describe --always --abbrev=7)
+MUTABLE_TAG    ?= latest
+IMAGE          ?= cluster-control-plane-machine-set-operator
+BUILD_IMAGE    ?= registry.ci.openshift.org/openshift/release:golang-1.21
+VCM_IMAGE      ?= quay.io/ocp-splat/machine-ipam-controller:latest
+TEST_NAMESPACE ?= vsphere-infra-helpers
 
 
 .PHONY: all
@@ -75,3 +77,32 @@ generate: ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject
 .PHONY: image
 image:
 	hack/build-image
+
+# Used to deploy the VCM to a cluster.  This currently assumes namespace of vsphere-infra-helpers already exists.
+.PHONY: deploy
+deploy: deploy-crds deploy-configs deploy-deployment
+
+.PHONY: deploy-crds
+deploy-crds:
+	# Install CRDs
+	oc apply -f config/crd/bases/vspherecapacitymanager.splat.io_leases.yaml
+	oc apply -f config/crd/bases/vspherecapacitymanager.splat.io_networks.yaml
+	oc apply -f config/crd/bases/vspherecapacitymanager.splat.io_pools.yaml
+
+.PHONY: deploy-configs
+deploy-configs:
+	# Install service account, roles, rolebinding and deployments
+	oc apply -f manifests/serviceaccount.yaml
+	oc apply -f manifests/clusterrole.yaml
+	oc apply -f manifests/clusterrolebinding.yaml
+	oc apply -f manifests/services.yaml
+	oc apply -f manifests/servicemonitors.yaml
+
+.PHONY: deploy-deployment
+deploy-deployment:
+	$(info Creating deployment with image $(VCM_IMAGE))
+	sed 's|<image>|$(VCM_IMAGE)|g' manifests/deployment.yaml | oc apply -f -
+
+.PHONY: apply-test-manifests
+apply-test-manifests:
+	oc apply -n $(TEST_NAMESPACE) -f test/manifests/
