@@ -1612,11 +1612,20 @@ var _ = Describe("Lease management", func() {
 			Expect(lease.Status.EnvVarsMap).NotTo(BeNil())
 			Expect(len(lease.Status.EnvVarsMap)).To(Equal(2), "envVarsMap should have 2 entries")
 
-			// Verify each entry is not empty and contains expected env vars
-			for server, envVars := range lease.Status.EnvVarsMap {
-				Expect(envVars).NotTo(BeEmpty(), "envVars for server %s should not be empty", server)
+			// Collect pool names from owner references
+			poolNames := make(map[string]bool)
+			for _, ownerRef := range lease.OwnerReferences {
+				if ownerRef.Kind == "Pool" {
+					poolNames[ownerRef.Name] = true
+				}
+			}
+
+			// Verify each pool has an entry in envVarsMap
+			for poolName := range poolNames {
+				envVars, exists := lease.Status.EnvVarsMap[poolName]
+				Expect(exists).To(BeTrue(), "envVarsMap should have entry for pool %s", poolName)
+				Expect(envVars).NotTo(BeEmpty(), "envVars for pool %s should not be empty", poolName)
 				Expect(envVars).To(ContainSubstring("export vsphere_url="), "envVars should contain vsphere_url")
-				Expect(envVars).To(ContainSubstring(server), "envVars should reference the server %s", server)
 			}
 		})
 

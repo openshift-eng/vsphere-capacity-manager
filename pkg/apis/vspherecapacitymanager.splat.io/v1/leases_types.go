@@ -135,9 +135,9 @@ type LeaseStatus struct {
 	// +optional
 	EnvVars string `json:"envVars,omitempty"`
 
-	// EnvVarsMap contains environment variables for each vCenter server.
-	// The key is the vCenter server name and the value is the bash script to be sourced.
-	// This field supports multi-pool leases where each pool may be on a different vCenter.
+	// EnvVarsMap contains environment variables for each pool.
+	// The key is the pool name and the value is the bash script to be sourced.
+	// This field supports multi-pool leases where each pool has different configurations.
 	// +optional
 	EnvVarsMap map[string]string `json:"envVarsMap,omitempty"`
 

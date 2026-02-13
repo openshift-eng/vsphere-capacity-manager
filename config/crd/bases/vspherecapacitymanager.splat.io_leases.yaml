@@ -198,10 +198,10 @@ spec:
               envVarsMap:
                 additionalProperties:
                   type: string
-                description: EnvVarsMap contains environment variables for each vCenter
-                  server. The key is the vCenter server name and the value is the
-                  bash script to be sourced. This field supports multi-pool leases
-                  where each pool may be on a different vCenter.
+                description: EnvVarsMap contains environment variables for each pool.
+                  The key is the pool name and the value is the bash script to be
+                  sourced. This field supports multi-pool leases where each pool has
+                  different configurations.
                 type: object
               job-link:
                 description: JobLink defines a link to the job that owns this lease.  Its

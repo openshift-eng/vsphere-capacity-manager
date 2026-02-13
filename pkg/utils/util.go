@@ -139,11 +139,11 @@ func GenerateEnvVars(lease *v1.Lease, pool *v1.Pool, network *v1.Network) error 
 	// Set the deprecated EnvVars field for backward compatibility
 	lease.Status.EnvVars = envVarsString
 
-	// Initialize EnvVarsMap if needed and add entry for this vCenter
+	// Initialize EnvVarsMap if needed and add entry for this pool
 	if lease.Status.EnvVarsMap == nil {
 		lease.Status.EnvVarsMap = make(map[string]string)
 	}
-	lease.Status.EnvVarsMap[pool.Spec.Server] = envVarsString
+	lease.Status.EnvVarsMap[pool.Name] = envVarsString
 
 	return nil
 }
