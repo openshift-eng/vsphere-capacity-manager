@@ -402,8 +402,12 @@ func doesLeaseContainPortGroup(lease *v1.Lease, pool *v1.Pool, network *v1.Netwo
 
 	for _, owner := range lease.OwnerReferences {
 		if owner.Kind == "Network" {
-			if poolNetworks[owner.Name].Spec.VlanId == network.Spec.VlanId &&
-				*poolNetworks[owner.Name].Spec.DatacenterName == *network.Spec.DatacenterName {
+			poolNetwork, exists := poolNetworks[owner.Name]
+			if !exists {
+				continue
+			}
+			if poolNetwork.Spec.VlanId == network.Spec.VlanId &&
+				*poolNetwork.Spec.DatacenterName == *network.Spec.DatacenterName {
 				return true
 			}
 		}
