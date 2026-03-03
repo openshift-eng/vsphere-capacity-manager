@@ -29,6 +29,14 @@ const (
 	JobNameLabel              = "job-name"
 	ALLOW_MULTI_TO_USE_SINGLE = false
 
+	// LEASE_PENDING_RETRY_INTERVAL controls how often PENDING leases are retried
+	// when no pools/networks are available
+	LEASE_PENDING_RETRY_INTERVAL = 30 * time.Second
+
+	// LEASE_PARTIAL_RETRY_INTERVAL controls how often PARTIAL leases are retried
+	// when not all pools/networks are fulfilled
+	LEASE_PARTIAL_RETRY_INTERVAL = 30 * time.Second
+
 	// PROW_JOB_PERIODICAL_URL is used to generate URL for periodical jobs.  Need to supply PROW_JOB_URL_PREFIX_KEY, PROW_GS_BUCKET_KEY, PROW_JOB and PROW_BUILD_ID.
 	PROW_JOB_PERIODICAL_URL = "%vgs/%v/logs/%v/%v"
 
@@ -603,7 +611,8 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
 		updateLeaseMetrics()
 
-		return ctrl.Result{}, fmt.Errorf("lease %v is being delayed", lease.Name)
+		log.Printf("lease %s is DELAYED - requeuing in %v", lease.Name, LEASE_PENDING_RETRY_INTERVAL)
+		return ctrl.Result{RequeueAfter: LEASE_PENDING_RETRY_INTERVAL}, nil
 	}
 
 	// Since lease is not delayed, clear the condition
@@ -669,7 +678,8 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 			// since we do not trigger lease update, we still need to update metrics in case first status update.
 			updateLeaseMetrics()
-			return ctrl.Result{}, fmt.Errorf("unable to get matching pool: %v", err)
+			log.Printf("lease %s is PENDING, no pool available - requeuing in %v", lease.Name, LEASE_PENDING_RETRY_INTERVAL)
+			return ctrl.Result{RequeueAfter: LEASE_PENDING_RETRY_INTERVAL}, nil
 		}
 
 		log.Printf("Lease %s now has %d owner references after GetPoolWithStrategy", lease.Name, len(lease.OwnerReferences))
@@ -995,8 +1005,19 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		l.triggerPoolUpdates(ctx)
 		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
-	}
-	updateLeaseMetrics()
+		updateLeaseMetrics()
 
+		// FULFILLED leases don't need rescheduling
+		return ctrl.Result{}, nil
+	}
+
+	// For PARTIAL leases, schedule retry
+	if lease.Status.Phase == v1.PHASE_PARTIAL {
+		updateLeaseMetrics()
+		log.Printf("lease %s is PARTIAL - requeuing in %v", lease.Name, LEASE_PARTIAL_RETRY_INTERVAL)
+		return ctrl.Result{RequeueAfter: LEASE_PARTIAL_RETRY_INTERVAL}, nil
+	}
+
+	updateLeaseMetrics()
 	return ctrl.Result{}, nil
 }
