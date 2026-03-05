@@ -702,39 +702,6 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Use the first pool for backward compatibility with status fields
 	pool := assignedPools[0]
 
-	// Populate backward compatibility fields from the first pool
-	pool.Spec.FailureDomainSpec.DeepCopyInto(&lease.Status.FailureDomainSpec)
-	// Networks will be populated later
-	lease.Status.Topology.Networks = []string{}
-	log.Printf("Set backward compatibility fields from first pool %s", pool.Name)
-
-	// Populate poolInfo array with FailureDomainSpec from each assigned pool
-	lease.Status.PoolInfo = make([]v1.FailureDomainSpec, 0, len(assignedPools))
-	for _, poolItem := range assignedPools {
-		// Get networks available in this pool
-		poolNetworksMap := getNetworksForPool(poolItem)
-
-		// Find networks assigned to this lease for this specific pool
-		assignedNetworks := []string{}
-		for _, ownerRef := range lease.OwnerReferences {
-			if ownerRef.Kind == "Network" {
-				if net, exists := poolNetworksMap[ownerRef.Name]; exists {
-					// This network belongs to this pool and is assigned to the lease
-					networkPath := fmt.Sprintf("/%s/network/%s", poolItem.Spec.Topology.Datacenter, net.Spec.PortGroupName)
-					assignedNetworks = append(assignedNetworks, networkPath)
-				}
-			}
-		}
-
-		// Create a copy of the FailureDomainSpec from the pool
-		poolFailureDomain := poolItem.Spec.FailureDomainSpec
-		// Update the topology with only assigned networks
-		poolFailureDomain.Topology.Networks = assignedNetworks
-
-		lease.Status.PoolInfo = append(lease.Status.PoolInfo, poolFailureDomain)
-		log.Printf("Added pool info for pool %s to lease %s with %d networks", poolItem.Name, lease.Name, len(assignedNetworks))
-	}
-
 	// Initialize EnvVarsMap if needed
 	if lease.Status.EnvVarsMap == nil {
 		lease.Status.EnvVarsMap = make(map[string]string)
@@ -903,7 +870,6 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
-	lease.Status.Topology.Networks = allNetworks
 	log.Printf("Lease %v has %d total network owner references, %d unique networks in status", lease.Name, len(vlanToNetworks), len(allNetworks))
 
 	// Check if all pools and networks have been assigned
@@ -944,6 +910,37 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		lease.Name, len(assignedPools), requiredPools, lease.Spec.Networks, minNetworksAssigned)
 
 	if poolsFulfilled && networksFulfilled {
+		// Only update status topology and poolInfo when we have valid data to write.
+		// The CRD requires topology.networks to be non-empty (minItems: 1), so writing
+		// empty network arrays would be rejected by the API server.
+
+		// Populate backward compatibility fields from the first pool
+		pool.Spec.FailureDomainSpec.DeepCopyInto(&lease.Status.FailureDomainSpec)
+		lease.Status.Topology.Networks = allNetworks
+		log.Printf("Set backward compatibility fields from first pool %s", pool.Name)
+
+		// Populate poolInfo array with FailureDomainSpec from each assigned pool
+		lease.Status.PoolInfo = make([]v1.FailureDomainSpec, 0, len(assignedPools))
+		for _, poolItem := range assignedPools {
+			poolNetworksMap := getNetworksForPool(poolItem)
+
+			assignedNetworks := []string{}
+			for _, ownerRef := range lease.OwnerReferences {
+				if ownerRef.Kind == "Network" {
+					if net, exists := poolNetworksMap[ownerRef.Name]; exists {
+						networkPath := fmt.Sprintf("/%s/network/%s", poolItem.Spec.Topology.Datacenter, net.Spec.PortGroupName)
+						assignedNetworks = append(assignedNetworks, networkPath)
+					}
+				}
+			}
+
+			poolFailureDomain := poolItem.Spec.FailureDomainSpec
+			poolFailureDomain.Topology.Networks = assignedNetworks
+
+			lease.Status.PoolInfo = append(lease.Status.PoolInfo, poolFailureDomain)
+			log.Printf("Added pool info for pool %s to lease %s with %d networks", poolItem.Name, lease.Name, len(assignedNetworks))
+		}
+
 		lease.Status.Phase = v1.PHASE_FULFILLED
 
 		conditions.Set(lease, conditions.TrueCondition(
@@ -955,53 +952,22 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		conditions.Set(lease, conditions.FalseCondition(
 			v1.LeaseConditionTypePartial,
 		))
-	} else {
-		lease.Status.Phase = v1.PHASE_PARTIAL
-		conditions.Set(lease, conditions.FalseCondition(
-			v1.LeaseConditionTypePending,
-		))
 
-		var reason string
-		if !poolsFulfilled {
-			reason = fmt.Sprintf("lease is currently assigned %d of %d pools", len(assignedPools), requiredPools)
-		} else if !allPoolsHaveNetworks {
-			reason = fmt.Sprintf("pools do not all have required networks (need %d networks per pool, minimum assigned: %d)",
-				lease.Spec.Networks, minNetworksAssigned)
-		} else {
-			reason = "lease is partially fulfilled"
+		leaseStatus := lease.Status.DeepCopy()
+		err = l.Client.Update(ctx, lease)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("error updating lease, requeuing: %v", err)
 		}
 
-		conditions.Set(lease, conditions.FalseConditionWithReason(
-			v1.LeaseConditionTypeFulfilled,
-			v1.ReasonLeasePartial,
-			v1.ConditionSeverityInfo,
-			reason,
-		))
-		conditions.Set(lease, conditions.TrueCondition(
-			v1.LeaseConditionTypePartial,
-		))
-	}
+		leaseStatus.DeepCopyInto(&lease.Status)
 
-	leaseStatus := lease.Status.DeepCopy()
-	err = l.Client.Update(ctx, lease)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("error updating lease, requeuing: %v", err)
-	}
+		err = l.Client.Status().Update(ctx, lease)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("error updating lease, requeuing: %v", err)
+		}
 
-	leaseStatus.DeepCopyInto(&lease.Status)
-
-	err = l.Client.Status().Update(ctx, lease)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("error updating lease, requeuing: %v", err)
-	}
-
-	if lease.Status.Phase == v1.PHASE_FULFILLED {
 		promLabels["pool"] = pool.Name
 		LeasesInUse.With(promLabels).Add(1)
-
-		if pool.Annotations == nil {
-			pool.Annotations = make(map[string]string)
-		}
 
 		l.triggerPoolUpdates(ctx)
 		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
@@ -1011,13 +977,51 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
-	// For PARTIAL leases, schedule retry
-	if lease.Status.Phase == v1.PHASE_PARTIAL {
-		updateLeaseMetrics()
-		log.Printf("lease %s is PARTIAL - requeuing in %v", lease.Name, LEASE_PARTIAL_RETRY_INTERVAL)
-		return ctrl.Result{RequeueAfter: LEASE_PARTIAL_RETRY_INTERVAL}, nil
+	// Lease is PARTIAL: pools or networks not fully assigned.
+	// Do NOT write status topology/poolInfo with empty network arrays -- the CRD
+	// validation requires topology.networks to have at least 1 item (minItems: 1).
+	// Persist owner references (pool/network assignments made so far) via Update(),
+	// then update only the phase and conditions via Status().Update(), preserving the
+	// existing topology placeholder values set during initialization.
+	lease.Status.Phase = v1.PHASE_PARTIAL
+	conditions.Set(lease, conditions.FalseCondition(
+		v1.LeaseConditionTypePending,
+	))
+
+	var reason string
+	if !poolsFulfilled {
+		reason = fmt.Sprintf("lease is currently assigned %d of %d pools", len(assignedPools), requiredPools)
+	} else if !allPoolsHaveNetworks {
+		reason = fmt.Sprintf("pools do not all have required networks (need %d networks per pool, minimum assigned: %d)",
+			lease.Spec.Networks, minNetworksAssigned)
+	} else {
+		reason = "lease is partially fulfilled"
+	}
+
+	conditions.Set(lease, conditions.FalseConditionWithReason(
+		v1.LeaseConditionTypeFulfilled,
+		v1.ReasonLeasePartial,
+		v1.ConditionSeverityInfo,
+		reason,
+	))
+	conditions.Set(lease, conditions.TrueCondition(
+		v1.LeaseConditionTypePartial,
+	))
+
+	// Persist owner references (pool/network assignments) without modifying status topology
+	leaseStatus := lease.Status.DeepCopy()
+	err = l.Client.Update(ctx, lease)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("error updating lease, requeuing: %v", err)
+	}
+
+	leaseStatus.DeepCopyInto(&lease.Status)
+
+	if err := l.Client.Status().Update(ctx, lease); err != nil {
+		log.Printf("unable to update lease status: %v", err)
 	}
 
 	updateLeaseMetrics()
-	return ctrl.Result{}, nil
+	log.Printf("lease %s is PARTIAL - requeuing in %v", lease.Name, LEASE_PARTIAL_RETRY_INTERVAL)
+	return ctrl.Result{RequeueAfter: LEASE_PARTIAL_RETRY_INTERVAL}, nil
 }

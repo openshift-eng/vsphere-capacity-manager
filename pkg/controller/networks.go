@@ -72,7 +72,7 @@ func (l *NetworkReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				return ctrl.Result{}, fmt.Errorf("error updating network: %w", err)
 			}
 		}
-		delete(pools, networkKey)
+		delete(networks, networkKey)
 		return ctrl.Result{}, nil
 	}
 
