@@ -478,6 +478,18 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		lease.Status.ShortName = "pending"
 		lease.Status.Topology.Networks = append(lease.Status.Topology.Networks, "/pending/network/pending")
 
+		// Add pending for PoolInfo
+		poolPending := v1.FailureDomainSpec{}
+		poolPending.Topology.Datacenter = "pending"
+		poolPending.Topology.Datastore = "/pending/datastore/pending"
+		poolPending.Topology.ComputeCluster = "/pending/host/pending"
+		poolPending.Server = "pending"
+		poolPending.Zone = "pending"
+		poolPending.Region = "pending"
+		poolPending.Name = "pending"
+		poolPending.ShortName = "pending"
+		poolPending.Topology.Networks = append(poolPending.Topology.Networks, "/pending/network/pending")
+
 		// Add the job link / info to status field.
 		lease.Status.JobLink = generateJobLink(lease)
 		log.Printf("generated job url '%v' for lease '%v'", lease.Status.JobLink, lease.Name)
@@ -708,33 +720,6 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	lease.Status.Topology.Networks = []string{}
 	log.Printf("Set backward compatibility fields from first pool %s", pool.Name)
 
-	// Populate poolInfo array with FailureDomainSpec from each assigned pool
-	lease.Status.PoolInfo = make([]v1.FailureDomainSpec, 0, len(assignedPools))
-	for _, poolItem := range assignedPools {
-		// Get networks available in this pool
-		poolNetworksMap := getNetworksForPool(poolItem)
-
-		// Find networks assigned to this lease for this specific pool
-		assignedNetworks := []string{}
-		for _, ownerRef := range lease.OwnerReferences {
-			if ownerRef.Kind == "Network" {
-				if net, exists := poolNetworksMap[ownerRef.Name]; exists {
-					// This network belongs to this pool and is assigned to the lease
-					networkPath := fmt.Sprintf("/%s/network/%s", poolItem.Spec.Topology.Datacenter, net.Spec.PortGroupName)
-					assignedNetworks = append(assignedNetworks, networkPath)
-				}
-			}
-		}
-
-		// Create a copy of the FailureDomainSpec from the pool
-		poolFailureDomain := poolItem.Spec.FailureDomainSpec
-		// Update the topology with only assigned networks
-		poolFailureDomain.Topology.Networks = assignedNetworks
-
-		lease.Status.PoolInfo = append(lease.Status.PoolInfo, poolFailureDomain)
-		log.Printf("Added pool info for pool %s to lease %s with %d networks", poolItem.Name, lease.Name, len(assignedNetworks))
-	}
-
 	// Initialize EnvVarsMap if needed
 	if lease.Status.EnvVarsMap == nil {
 		lease.Status.EnvVarsMap = make(map[string]string)
@@ -878,6 +863,34 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	// Populate poolInfo array with FailureDomainSpec from each assigned pool
+	// This must happen AFTER network assignment to ensure networks are in owner references
+	lease.Status.PoolInfo = make([]v1.FailureDomainSpec, 0, len(assignedPools))
+	for _, poolItem := range assignedPools {
+		// Get networks available in this pool
+		poolNetworksMap := getNetworksForPool(poolItem)
+
+		// Find networks assigned to this lease for this specific pool
+		assignedNetworks := []string{}
+		for _, ownerRef := range lease.OwnerReferences {
+			if ownerRef.Kind == "Network" {
+				if net, exists := poolNetworksMap[ownerRef.Name]; exists {
+					// This network belongs to this pool and is assigned to the lease
+					networkPath := fmt.Sprintf("/%s/network/%s", poolItem.Spec.Topology.Datacenter, net.Spec.PortGroupName)
+					assignedNetworks = append(assignedNetworks, networkPath)
+				}
+			}
+		}
+
+		// Create a copy of the FailureDomainSpec from the pool
+		poolFailureDomain := poolItem.Spec.FailureDomainSpec
+		// Update the topology with only assigned networks
+		poolFailureDomain.Topology.Networks = assignedNetworks
+
+		lease.Status.PoolInfo = append(lease.Status.PoolInfo, poolFailureDomain)
+		log.Printf("Added pool info for pool %s to lease %s with %d networks", poolItem.Name, lease.Name, len(assignedNetworks))
+	}
+
 	// Build the status.topology.networks list (using first pool's datacenter for the path)
 	var allNetworks []string
 	for _, ownerRef := range lease.OwnerReferences {
@@ -992,7 +1005,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	err = l.Client.Status().Update(ctx, lease)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("error updating lease, requeuing: %v", err)
+		return ctrl.Result{}, fmt.Errorf("error updating lease status, requeuing: %v", err)
 	}
 
 	if lease.Status.Phase == v1.PHASE_FULFILLED {
