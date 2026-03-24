@@ -6,9 +6,9 @@ A scheduler which aims to distribute OpenShift clusters among a pool of vCenters
 number vCenters, datacenter, and clusters, ensuring that an OpenShift cluster is being installed in to a environment with sufficient
 capactiy.
 
-![overview](/doc/vSphere%20Resource%20Manager.png)
+User-focused diagrams and walkthroughs: [doc/README.md](doc/README.md) (see [How it works](doc/how-it-works.md)).
 
-## Teminology
+## Terminology
 
 ### Pools
 
@@ -35,7 +35,7 @@ metadata:
   labels:
     boskos-lease-id: "test-id"
 spec:
-  requiredPool: <optional: name of the required pool>
+  required-pool: <optional: metadata name of the pool>
   vcpus: 24
   memory: 96
   networks: 1
@@ -175,9 +175,9 @@ A pool can be excluded from consideration unless a lease specifically requests i
 unique environment, or configuration, which warrants intentional scheduling to the pool.  To exclude a pool from scheduling, set 
 `spec.exclude` to true.
 
-To request a specific pool, a Lease must set `spec.requiredPool` to the name of the pool.
+To request a specific pool, a Lease must set `spec.required-pool` to the **metadata name** of the pool.
 
-TO-DO: implement a poolSelector paradigm
+To restrict scheduling by **labels**, use `spec.poolSelector` (key/value map on pool labels). To restrict by **dedicated hardware or queues**, use **taints** on the Pool and **tolerations** on the Lease. See [doc/scheduling.md](doc/scheduling.md).
 
 ## Networks
 

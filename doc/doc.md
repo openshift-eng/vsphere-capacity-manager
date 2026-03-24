@@ -1,5 +1,7 @@
 # Overview
 
+Operator concepts, scheduling, and CLI: see [doc/README.md](README.md).
+
 vSphere CI requires the use of mutliple environments in order to support the number of jobs and various required configurations. Historically, this has been handled by the creation of purpose targeted lease pools. While this has worked, some environments are overutilized while some environments are idle.  The VCM handles scheduling jobs to the most appropriate environment based on the requirements of the job and the utilization of environments. 
 
 # Job Configuration
