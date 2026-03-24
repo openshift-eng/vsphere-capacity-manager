@@ -12,7 +12,8 @@ The vSphere Capacity Manager is a Kubernetes operator that tracks **capacity** (
 | [Purpose-built networks](networks-purpose-built.md) | Adding a Network CR and wiring it to a Pool |
 | [CLI](cli.md) | `oc` / `kubectl` and the optional `oc-vcm` plugin |
 | [Pools and networks inventory](inventory-pools-networks.md) | Snapshot of CRs in one environment (refresh manually) |
-| [CI / Prow / vsphere-elastic](doc.md) | Job configuration, shared dir files, Vault |
+| [openshift/release and vsphere-elastic](ci-openshift-release.md) | Boskos, ci-operator `cluster_profile`, step-registry `-vcm` chains |
+| [CI / Prow / vsphere-elastic](doc.md) | Job env vars, `SHARED_DIR` files, Vault, step pairs |
 
 Developer build and test commands remain in the [repository README](../README.md).
 
