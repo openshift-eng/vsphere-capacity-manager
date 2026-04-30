@@ -116,6 +116,15 @@ func getNetworksForPool(pool *v1.Pool) map[string]*v1.Network {
 	return networksInPool
 }
 
+func getNetworkType(network *v1.Network) string {
+	if network.ObjectMeta.Labels != nil {
+		if val, exists := network.ObjectMeta.Labels[v1.NetworkTypeLabel]; exists {
+			return val
+		}
+	}
+	return string(v1.NetworkTypeSingleTenant)
+}
+
 // getAvailableNetworks retrieves networks which are not owned by a lease
 func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool, networkType v1.NetworkType) []*v1.Network {
 	networksInPool := getNetworksForPool(pool)
@@ -136,14 +145,7 @@ func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool, networkType v1.Net
 			}
 		}
 
-		thisNetworkType := string(v1.NetworkTypeSingleTenant)
-		if network.ObjectMeta.Labels != nil {
-			if val, exists := network.ObjectMeta.Labels[v1.NetworkTypeLabel]; exists {
-				log.Printf("network found with NeworkTypeLabel: %s", val)
-				thisNetworkType = val
-			}
-		}
-		if thisNetworkType != string(networkType) {
+		if getNetworkType(network) != string(networkType) {
 			continue
 		}
 		if !hasOwner {
@@ -293,6 +295,7 @@ func (l *LeaseReconciler) triggerLeaseUpdates(ctx context.Context, networkType v
 
 func updateLeaseMetrics() {
 	LeaseCounts.Reset()
+	LeaseAgeSeconds.Reset()
 	for _, lease := range leases {
 		promLabels := make(prometheus.Labels)
 		promLabels["phase"] = string(lease.Status.Phase)
@@ -300,6 +303,70 @@ func updateLeaseMetrics() {
 		promLabels["namespace"] = lease.Namespace
 
 		LeaseCounts.With(promLabels).Inc()
+
+		poolName := ""
+		for _, ownerRef := range lease.OwnerReferences {
+			if ownerRef.Kind == "Pool" {
+				poolName = ownerRef.Name
+				break
+			}
+		}
+		LeaseAgeSeconds.With(prometheus.Labels{
+			"namespace":   lease.Namespace,
+			"lease":       lease.Name,
+			"pool":        poolName,
+			"networkType": string(lease.Spec.NetworkType),
+		}).Set(time.Since(lease.CreationTimestamp.Time).Seconds())
+	}
+
+	updateNetworkTypeMetrics()
+}
+
+func updateNetworkTypeMetrics() {
+	PoolNetworksAvailableByType.Reset()
+	PoolNetworksTotalByType.Reset()
+	NetworkLeaseCount.Reset()
+
+	networkLeaseCount := make(map[string]float64)
+	for _, lease := range leases {
+		for _, ownerRef := range lease.OwnerReferences {
+			if ownerRef.Kind == "Network" {
+				networkLeaseCount[ownerRef.Name]++
+			}
+		}
+	}
+
+	for _, pool := range pools {
+		totalByType := make(map[string]float64)
+		availByType := make(map[string]float64)
+
+		networksInPool := getNetworksForPool(pool)
+		for _, network := range networksInPool {
+			netType := getNetworkType(network)
+			totalByType[netType]++
+
+			count := networkLeaseCount[network.Name]
+			if count == 0 {
+				availByType[netType]++
+			}
+
+			NetworkLeaseCount.With(prometheus.Labels{
+				"namespace":   pool.Namespace,
+				"network":     network.Name,
+				"networkType": netType,
+				"pool":        pool.Name,
+			}).Set(count)
+		}
+
+		for netType, total := range totalByType {
+			promLabels := prometheus.Labels{
+				"namespace":   pool.Namespace,
+				"pool":        pool.Name,
+				"networkType": netType,
+			}
+			PoolNetworksTotalByType.With(promLabels).Set(total)
+			PoolNetworksAvailableByType.With(promLabels).Set(availByType[netType])
+		}
 	}
 }
 
@@ -468,6 +535,11 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if len(lease.Status.Phase) == 0 {
 		lease.Status.Phase = v1.PHASE_PENDING
+		LeaseTransitionsTotal.With(prometheus.Labels{
+			"namespace":   lease.Namespace,
+			"networkType": string(lease.Spec.NetworkType),
+			"phase":       string(v1.PHASE_PENDING),
+		}).Inc()
 		lease.Status.Topology.Datacenter = "pending"
 		lease.Status.Topology.Datastore = "/pending/datastore/pending"
 		lease.Status.Topology.ComputeCluster = "/pending/host/pending"
@@ -574,6 +646,11 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if len(lease.Status.Phase) == 0 {
 		log.Printf("setting lease %s status to %s", lease.Name, v1.PHASE_PENDING)
 		lease.Status.Phase = v1.PHASE_PENDING
+		LeaseTransitionsTotal.With(prometheus.Labels{
+			"namespace":   lease.Namespace,
+			"networkType": string(lease.Spec.NetworkType),
+			"phase":       string(v1.PHASE_PENDING),
+		}).Inc()
 
 		conditions.Set(lease, conditions.FalseCondition(
 			v1.LeaseConditionTypeFulfilled,
@@ -604,6 +681,10 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// ensure that older leases get to finish getting their requests fulfilled before their Ci jobs timeout.
 	if shouldLeaseBeDelayed(lease) {
 		log.Printf("=========== lease %v is being delayed due to presence of higher priority leases ===========", lease.Name)
+		LeaseDelaysTotal.With(prometheus.Labels{
+			"namespace":   lease.Namespace,
+			"networkType": string(lease.Spec.NetworkType),
+		}).Inc()
 
 		conditions.Set(lease, conditions.TrueCondition(
 			v1.LeaseConditionTypeDelayed,
@@ -958,6 +1039,11 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if poolsFulfilled && networksFulfilled {
 		lease.Status.Phase = v1.PHASE_FULFILLED
+		LeaseTransitionsTotal.With(prometheus.Labels{
+			"namespace":   lease.Namespace,
+			"networkType": string(lease.Spec.NetworkType),
+			"phase":       string(v1.PHASE_FULFILLED),
+		}).Inc()
 
 		conditions.Set(lease, conditions.TrueCondition(
 			v1.LeaseConditionTypeFulfilled,
@@ -970,6 +1056,11 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		))
 	} else {
 		lease.Status.Phase = v1.PHASE_PARTIAL
+		LeaseTransitionsTotal.With(prometheus.Labels{
+			"namespace":   lease.Namespace,
+			"networkType": string(lease.Spec.NetworkType),
+			"phase":       string(v1.PHASE_PARTIAL),
+		}).Inc()
 		conditions.Set(lease, conditions.FalseCondition(
 			v1.LeaseConditionTypePending,
 		))

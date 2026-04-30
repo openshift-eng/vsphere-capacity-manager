@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 
 	generator "github.com/docker/docker/pkg/namesgenerator"
 	"github.com/prometheus/client_golang/prometheus"
@@ -104,19 +105,7 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		pool.Status.Initialized = true
 	}
 
-	promLabels := prometheus.Labels{
-		"namespace": req.Namespace,
-		"pool":      req.Name,
-	}
-
 	pools[poolKey] = pool
-
-	PoolMemoryAvailable.With(promLabels).Set(float64(pool.Status.MemoryAvailable))
-	PoolMemoryTotal.With(promLabels).Set(float64(pool.Spec.Memory))
-	PoolNetworksAvailable.With(promLabels).Set(float64(pool.Status.NetworkAvailable))
-	PoolCpusAvailable.With(promLabels).Set(float64(pool.Status.VCpusAvailable))
-	PoolCpusTotal.With(promLabels).Set(float64(pool.Spec.VCpus))
-	LeasesInUse.With(promLabels).Set(float64(pool.Status.LeaseCount))
 
 	reconciledPools := reconcilePoolStates()
 	for _, reconciledPool := range reconciledPools {
@@ -128,6 +117,47 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			}
 		}
 	}
+
+	promLabels := prometheus.Labels{
+		"namespace": req.Namespace,
+		"pool":      req.Name,
+	}
+
+	PoolMemoryAvailable.With(promLabels).Set(float64(pool.Status.MemoryAvailable))
+	PoolMemoryTotal.With(promLabels).Set(float64(pool.Spec.Memory))
+	PoolNetworksAvailable.With(promLabels).Set(float64(pool.Status.NetworkAvailable))
+	PoolNetworksTotal.With(promLabels).Set(float64(len(pool.Spec.Topology.Networks)))
+	PoolCpusAvailable.With(promLabels).Set(float64(pool.Status.VCpusAvailable))
+	PoolCpusTotal.With(promLabels).Set(float64(pool.Spec.VCpus))
+	LeasesInUse.With(promLabels).Set(float64(pool.Status.LeaseCount))
+
+	overCommitRatio, err := strconv.ParseFloat(pool.Spec.OverCommitRatio, 64)
+	if err != nil {
+		overCommitRatio = 1.0
+	}
+	effectiveCpus := float64(pool.Spec.VCpus) * overCommitRatio
+	if effectiveCpus > 0 {
+		PoolVcpusUtilizationRatio.With(promLabels).Set((effectiveCpus - float64(pool.Status.VCpusAvailable)) / effectiveCpus)
+	}
+	if pool.Spec.Memory > 0 {
+		PoolMemoryUtilizationRatio.With(promLabels).Set(float64(pool.Spec.Memory-pool.Status.MemoryAvailable) / float64(pool.Spec.Memory))
+	}
+	networksTotal := float64(len(pool.Spec.Topology.Networks))
+	if networksTotal > 0 {
+		PoolNetworksUtilizationRatio.With(promLabels).Set((networksTotal - float64(pool.Status.NetworkAvailable)) / networksTotal)
+	}
+
+	noSchedule := float64(0)
+	if pool.Spec.NoSchedule {
+		noSchedule = 1
+	}
+	PoolNoSchedule.With(promLabels).Set(noSchedule)
+
+	excluded := float64(0)
+	if pool.Spec.Exclude {
+		excluded = 1
+	}
+	PoolExcluded.With(promLabels).Set(excluded)
 
 	return ctrl.Result{}, nil
 }
