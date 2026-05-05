@@ -2,7 +2,7 @@ name: build
 
 on:
   pull_request:
-    types: [opened, labeled, unlabeled, synchronize]
+    types: [opened, synchronize, reopened]
 jobs:
   image:
     runs-on: ubuntu-latest
