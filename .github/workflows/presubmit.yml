@@ -1,7 +1,7 @@
 name: lint
 on:
   pull_request:
-    types: [opened, labeled, unlabeled, synchronize]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
