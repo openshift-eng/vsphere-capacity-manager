@@ -16,6 +16,12 @@ func setupTestNetworks(nets map[string]*v1.Network) func() {
 	return func() { networks = old }
 }
 
+func setupTestLeases(ls map[string]*v1.Lease) func() {
+	old := leases
+	leases = ls
+	return func() { leases = old }
+}
+
 func TestDoesLeaseContainPortGroup(t *testing.T) {
 	dc := "dc1"
 	pod := "pod1"
@@ -152,6 +158,173 @@ func TestDoesLeaseContainPortGroup(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetCommonNetworksForLease(t *testing.T) {
+	dc1 := "cidatacenter-1"
+	dc2 := "cidatacenter-2"
+	pod := "dal10.pod03"
+
+	// Network in pool A's topology (portGroupName matches pool A's path)
+	netPoolA := &v1.Network{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "ci-vlan-1284-dal10-dal10.pod03-1",
+			Labels: map[string]string{
+				v1.NetworkTypeLabel: "multi-tenant",
+			},
+		},
+		TypeMeta: metav1.TypeMeta{Kind: "Network"},
+		Spec: v1.NetworkSpec{
+			PortGroupName:  "ci-vlan-1284-1",
+			VlanId:         "1284",
+			DatacenterName: &dc1,
+			PodName:        &pod,
+		},
+	}
+
+	// Network in pool B's topology (portGroupName matches pool B's path)
+	netPoolB := &v1.Network{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "ci-vlan-1284-dal10-dal10.pod03-2",
+			Labels: map[string]string{
+				v1.NetworkTypeLabel: "multi-tenant",
+			},
+		},
+		TypeMeta: metav1.TypeMeta{Kind: "Network"},
+		Spec: v1.NetworkSpec{
+			PortGroupName:  "ci-vlan-1284-2",
+			VlanId:         "1284",
+			DatacenterName: &dc2,
+			PodName:        &pod,
+		},
+	}
+
+	// Pool A has portgroup ci-vlan-1284-1
+	poolA := &v1.Pool{
+		ObjectMeta: metav1.ObjectMeta{Name: "pool-a"},
+		Spec: v1.PoolSpec{
+			FailureDomainSpec: v1.FailureDomainSpec{
+				VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+					Topology: configv1.VSpherePlatformTopology{
+						Networks: []string{"/cidatacenter-1/network/ci-vlan-1284-1"},
+					},
+				},
+			},
+			IBMPoolSpec: v1.IBMPoolSpec{Pod: pod},
+		},
+	}
+
+	// Pool B has portgroup ci-vlan-1284-2
+	poolB := &v1.Pool{
+		ObjectMeta: metav1.ObjectMeta{Name: "pool-b"},
+		Spec: v1.PoolSpec{
+			FailureDomainSpec: v1.FailureDomainSpec{
+				VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+					Topology: configv1.VSpherePlatformTopology{
+						Networks: []string{"/cidatacenter-2/network/ci-vlan-1284-2"},
+					},
+				},
+			},
+			IBMPoolSpec: v1.IBMPoolSpec{Pod: pod},
+		},
+	}
+
+	// Sibling lease on pool A, already has netPoolA assigned
+	siblingLease := &v1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "job-lease-a",
+			Labels: map[string]string{
+				BoskosIdLabel: "job-123",
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{Kind: "Pool", Name: "pool-a"},
+				{Kind: "Network", Name: netPoolA.Name, UID: netPoolA.UID},
+			},
+		},
+		Spec: v1.LeaseSpec{
+			VCpus:       8,
+			Memory:      32,
+			NetworkType: v1.NetworkTypeMultiTenant,
+		},
+		Status: v1.LeaseStatus{
+			Phase: v1.PHASE_PENDING,
+		},
+	}
+
+	// Target lease on pool B, same Boskos ID, no networks yet
+	targetLease := &v1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "job-lease-b",
+			Labels: map[string]string{
+				BoskosIdLabel: "job-123",
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{Kind: "Pool", Name: "pool-b"},
+			},
+		},
+		Spec: v1.LeaseSpec{
+			VCpus:       8,
+			Memory:      32,
+			NetworkType: v1.NetworkTypeMultiTenant,
+		},
+		Status: v1.LeaseStatus{
+			Phase: v1.PHASE_PENDING,
+		},
+	}
+
+	cleanupNetworks := setupTestNetworks(map[string]*v1.Network{
+		netPoolA.Name: netPoolA,
+		netPoolB.Name: netPoolB,
+	})
+	defer cleanupNetworks()
+
+	cleanupLeases := setupTestLeases(map[string]*v1.Lease{
+		siblingLease.Name: siblingLease,
+		targetLease.Name:  targetLease,
+	})
+	defer cleanupLeases()
+
+	reconciler := &LeaseReconciler{}
+
+	t.Run("returns sibling networks unfiltered", func(t *testing.T) {
+		got, err := reconciler.getCommonNetworksForLease(targetLease)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 || got[0].Name != netPoolA.Name {
+			t.Errorf("expected sibling's network %s, got %v", netPoolA.Name, got)
+		}
+	})
+
+	t.Run("sibling network not in target pool topology", func(t *testing.T) {
+		poolNetworksMap := getNetworksForPool(poolB)
+		if _, exists := poolNetworksMap[netPoolA.Name]; exists {
+			t.Error("sibling's network should NOT be in pool B's topology")
+		}
+	})
+
+	t.Run("pool-local network is in target pool topology", func(t *testing.T) {
+		poolNetworksMap := getNetworksForPool(poolB)
+		if _, exists := poolNetworksMap[netPoolB.Name]; !exists {
+			t.Error("pool B's own network should be in its topology")
+		}
+	})
+
+	t.Run("getAvailableNetworks returns pool-local network", func(t *testing.T) {
+		got := reconciler.getAvailableNetworks(poolB, v1.NetworkTypeMultiTenant)
+		if len(got) != 1 || got[0].Name != netPoolB.Name {
+			t.Errorf("expected pool B's network %s, got %v", netPoolB.Name, got)
+		}
+	})
+
+	t.Run("getAvailableNetworks excludes cross-pool network", func(t *testing.T) {
+		got := reconciler.getAvailableNetworks(poolA, v1.NetworkTypeMultiTenant)
+		for _, n := range got {
+			if n.Name == netPoolB.Name {
+				t.Error("pool A's available networks should not include pool B's network")
+			}
+		}
+	})
 }
 
 func TestGetNetworkType(t *testing.T) {

@@ -853,6 +853,22 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			// First, try to get common networks (for cross-pool communication)
 			var availableNetworks []*v1.Network
 			availableNetworks, err = l.getCommonNetworksForLease(lease)
+			if err == nil {
+				// Filter common networks to only those in the current pool's topology.
+				// Sibling leases may be on different pools whose networks don't exist here.
+				var poolFiltered []*v1.Network
+				for _, n := range availableNetworks {
+					if _, exists := poolNetworksMap[n.Name]; exists {
+						poolFiltered = append(poolFiltered, n)
+					}
+				}
+				if len(poolFiltered) == 0 {
+					log.Printf("common networks not available in pool %s, falling back to pool-local networks", currentPool.Name)
+					err = fmt.Errorf("no common networks in pool %s", currentPool.Name)
+				} else {
+					availableNetworks = poolFiltered
+				}
+			}
 			if err != nil {
 				log.Printf("error getting common network for lease, will attempt to allocate new networks: %v", err)
 
