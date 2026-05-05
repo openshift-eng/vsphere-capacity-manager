@@ -558,3 +558,155 @@ func TestUpdateLeaseMetrics(t *testing.T) {
 		t.Errorf("expected lease age near 0 seconds, got %v", age)
 	}
 }
+
+func TestPoolMissingNetworks(t *testing.T) {
+	dc := "dc1"
+	pod := "pod1"
+
+	net1 := &v1.Network{
+		ObjectMeta: metav1.ObjectMeta{Name: "net-1"},
+		TypeMeta:   metav1.TypeMeta{Kind: "Network"},
+		Spec: v1.NetworkSpec{
+			VlanId:         "100",
+			DatacenterName: &dc,
+			PodName:        &pod,
+			PortGroupName:  "pg-100",
+		},
+	}
+
+	net2 := &v1.Network{
+		ObjectMeta: metav1.ObjectMeta{Name: "net-2"},
+		TypeMeta:   metav1.TypeMeta{Kind: "Network"},
+		Spec: v1.NetworkSpec{
+			VlanId:         "200",
+			DatacenterName: &dc,
+			PodName:        &pod,
+			PortGroupName:  "pg-200",
+		},
+	}
+
+	poolA := &v1.Pool{
+		ObjectMeta: metav1.ObjectMeta{Name: "pool-a"},
+		Spec: v1.PoolSpec{
+			FailureDomainSpec: v1.FailureDomainSpec{
+				VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+					Topology: configv1.VSpherePlatformTopology{
+						Networks: []string{"/dc1/network/pg-100"},
+					},
+				},
+			},
+			IBMPoolSpec: v1.IBMPoolSpec{Pod: pod},
+		},
+	}
+
+	poolB := &v1.Pool{
+		ObjectMeta: metav1.ObjectMeta{Name: "pool-b"},
+		Spec: v1.PoolSpec{
+			FailureDomainSpec: v1.FailureDomainSpec{
+				VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+					Topology: configv1.VSpherePlatformTopology{
+						Networks: []string{"/dc1/network/pg-200"},
+					},
+				},
+			},
+			IBMPoolSpec: v1.IBMPoolSpec{Pod: pod},
+		},
+	}
+
+	cleanup := setupTestNetworks(map[string]*v1.Network{
+		"net-1": net1,
+		"net-2": net2,
+	})
+	defer cleanup()
+
+	tests := []struct {
+		name         string
+		lease        *v1.Lease
+		pools        []*v1.Pool
+		wantMissing  bool
+		wantPoolName string
+	}{
+		{
+			name: "returns false when all pools have networks",
+			lease: &v1.Lease{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "Pool", Name: "pool-a"},
+						{Kind: "Network", Name: "net-1"},
+						{Kind: "Pool", Name: "pool-b"},
+						{Kind: "Network", Name: "net-2"},
+					},
+				},
+			},
+			pools:       []*v1.Pool{poolA, poolB},
+			wantMissing: false,
+		},
+		{
+			name: "returns true when a pool has no networks",
+			lease: &v1.Lease{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "Pool", Name: "pool-a"},
+						{Kind: "Pool", Name: "pool-b"},
+						{Kind: "Network", Name: "net-1"},
+					},
+				},
+			},
+			pools:        []*v1.Pool{poolA, poolB},
+			wantMissing:  true,
+			wantPoolName: "pool-b",
+		},
+		{
+			name: "returns true when no networks assigned at all",
+			lease: &v1.Lease{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "Pool", Name: "pool-a"},
+					},
+				},
+			},
+			pools:        []*v1.Pool{poolA},
+			wantMissing:  true,
+			wantPoolName: "pool-a",
+		},
+		{
+			name: "returns false with single pool that has a network",
+			lease: &v1.Lease{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "Pool", Name: "pool-a"},
+						{Kind: "Network", Name: "net-1"},
+					},
+				},
+			},
+			pools:       []*v1.Pool{poolA},
+			wantMissing: false,
+		},
+		{
+			name: "ignores networks not in pool topology",
+			lease: &v1.Lease{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "Pool", Name: "pool-a"},
+						{Kind: "Network", Name: "net-2"},
+					},
+				},
+			},
+			pools:        []*v1.Pool{poolA},
+			wantMissing:  true,
+			wantPoolName: "pool-a",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			poolName, missing := poolMissingNetworks(tt.lease, tt.pools)
+			if missing != tt.wantMissing {
+				t.Errorf("poolMissingNetworks() missing = %v, want %v", missing, tt.wantMissing)
+			}
+			if tt.wantMissing && poolName != tt.wantPoolName {
+				t.Errorf("poolMissingNetworks() poolName = %v, want %v", poolName, tt.wantPoolName)
+			}
+		})
+	}
+}

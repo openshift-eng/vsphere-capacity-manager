@@ -125,6 +125,27 @@ func getNetworkType(network *v1.Network) string {
 	return string(v1.NetworkTypeSingleTenant)
 }
 
+// poolMissingNetworks returns the name of the first pool that has zero networks
+// assigned in the lease's OwnerReferences, and true. If every pool has at least
+// one network, it returns ("", false).
+func poolMissingNetworks(lease *v1.Lease, assignedPools []*v1.Pool) (string, bool) {
+	for _, pool := range assignedPools {
+		poolNetworksMap := getNetworksForPool(pool)
+		count := 0
+		for _, ownerRef := range lease.OwnerReferences {
+			if ownerRef.Kind == "Network" {
+				if _, exists := poolNetworksMap[ownerRef.Name]; exists {
+					count++
+				}
+			}
+		}
+		if count == 0 {
+			return pool.Name, true
+		}
+	}
+	return "", false
+}
+
 // getAvailableNetworks retrieves networks which are not owned by a lease
 func (l *LeaseReconciler) getAvailableNetworks(pool *v1.Pool, networkType v1.NetworkType) []*v1.Network {
 	networksInPool := getNetworksForPool(pool)
@@ -958,6 +979,18 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				log.Printf("error generating env vars: %v", err)
 			}
 		}
+	}
+
+	// CRD validation requires MinItems=1 for topology.networks.
+	// If any pool has zero assigned networks, skip the status update to avoid rejection.
+	if poolName, missing := poolMissingNetworks(lease, assignedPools); missing {
+		log.Printf("pool %s has no networks assigned for lease %s, saving owner refs and requeuing", poolName, lease.Name)
+		err = l.Client.Update(ctx, lease)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("error updating lease owner references: %v", err)
+		}
+		updateLeaseMetrics()
+		return ctrl.Result{RequeueAfter: LEASE_PARTIAL_RETRY_INTERVAL}, nil
 	}
 
 	// Populate poolInfo array with FailureDomainSpec from each assigned pool

@@ -370,7 +370,7 @@ var _ = Describe("Lease management", func() {
 			})
 			By("waiting for the lease to be deleted", func() {
 				Eventually(func() bool {
-					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease) == nil
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease) != nil
 				}).Should(BeTrue())
 			})
 		})
@@ -481,7 +481,7 @@ var _ = Describe("Lease management", func() {
 			})
 			By("waiting for the lease to be deleted", func() {
 				Eventually(func() bool {
-					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease) == nil
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease) != nil
 				}).Should(BeTrue())
 			})
 		})
@@ -552,7 +552,10 @@ var _ = Describe("Lease management", func() {
 			})
 			By("waiting for the lease to be deleted", func() {
 				Eventually(func() bool {
-					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1) == nil
+					if k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1) == nil {
+						return false
+					}
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease2), lease2) != nil
 				}).Should(BeTrue())
 			})
 		})
@@ -657,7 +660,7 @@ var _ = Describe("Lease management", func() {
 			})
 			By("waiting for the lease to be deleted", func() {
 				Eventually(func() bool {
-					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1) == nil
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1) != nil
 				}).Should(BeTrue())
 			})
 		})
@@ -757,16 +760,16 @@ var _ = Describe("Lease management", func() {
 			})
 			By("waiting for the lease to be deleted", func() {
 				Eventually(func() bool {
-					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease3), lease3) == nil
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease3), lease3) != nil
 				}).Should(BeTrue())
 			})
 		})
 
-		// Now wait for lease 2 to now be fulfilled
+		// Now wait for testLease to be fulfilled
 		By("waiting for leases to be fulfilled", func() {
 			Eventually(func() bool {
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(testLease), testLease)
-				return lease2.Status.Phase == v1.PHASE_FULFILLED
+				return testLease.Status.Phase == v1.PHASE_FULFILLED
 			}).Should(BeTrue())
 		})
 
@@ -779,16 +782,13 @@ var _ = Describe("Lease management", func() {
 			})
 			By("waiting for the lease to be deleted", func() {
 				Eventually(func() bool {
-					lease := k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1)
-					if lease != nil {
+					if k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1) == nil {
 						return false
 					}
-					lease = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease2), lease2)
-					if lease != nil {
+					if k8sClient.Get(ctx, client.ObjectKeyFromObject(lease2), lease2) == nil {
 						return false
 					}
-
-					return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1) == nil
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(testLease), testLease) != nil
 				}).Should(BeTrue())
 			})
 		})
