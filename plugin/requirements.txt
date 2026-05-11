@@ -1,0 +1,2 @@
+# Python dependencies for oc-vcm plugin
+rich>=13.7.0
