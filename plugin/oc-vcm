@@ -6,6 +6,20 @@ import os
 import copy
 import subprocess
 import tempfile
+import sys
+
+# Try to import Rich, fall back to plain output if not available
+try:
+    from rich.console import Console
+    from rich.table import Table
+    from rich.text import Text
+    from rich.panel import Panel
+    from rich.layout import Layout
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
+    print("Warning: Rich library not installed. Using plain output.", file=sys.stderr)
+    print("Install with: pip install rich", file=sys.stderr)
 
 def run_executable(*argv):
     result = subprocess.run(argv, capture_output=True, text=True)
@@ -31,6 +45,23 @@ def getLeasesForPool(poolName):
                     break
 
     return matchingLeases
+
+def buildLeaseIndex():
+    """Build index of leases by pool name to avoid N+1 queries."""
+    lease_index = {}
+    leases = getLeases()
+
+    for lease in leases:
+        if "ownerReferences" in lease["metadata"]:
+            for owner in lease["metadata"]["ownerReferences"]:
+                if owner["kind"] == "Pool":
+                    pool_name = owner["name"]
+                    if pool_name not in lease_index:
+                        lease_index[pool_name] = []
+                    lease_index[pool_name].append(lease)
+                    break
+
+    return lease_index
 
 def getNetworks():
     output = run_executable("oc", "get", "networks.vspherecapacitymanager.splat.io", "-n", "vsphere-infra-helpers", "-o", "json")
@@ -127,7 +158,59 @@ def getLeaseStatus():
 
     return count, singleTenant, multiTenant, singleTenantPending, multiTenantPending, singleTenantPartial, multiTenantPartial
 
-def printStatus(includeExcluded):
+def getCapacityColor(percentage):
+    """Return color based on capacity percentage."""
+    if percentage >= 0.50:
+        return "green"
+    elif percentage >= 0.25:
+        return "yellow"
+    else:
+        return "red"
+
+def formatPercentageRich(percentage, label):
+    """Format percentage with color coding for Rich output."""
+    color = getCapacityColor(percentage)
+    pct_str = format(percentage, ".0%")
+    return Text(f"{label}: {pct_str}", style=color)
+
+def getBoolSymbol(value):
+    """Return a symbol for boolean values."""
+    if not RICH_AVAILABLE:
+        return str(value)
+    return Text("✓", style="yellow") if value else Text("✗", style="dim")
+
+def safe_percentage(numerator, denominator):
+    """Safe division helper that returns 0.0 when denominator is zero or empty."""
+    if not denominator:
+        return 0.0
+    return numerator / denominator
+
+def getHealthIndicator(pool):
+    """Return health indicator based on pool capacity."""
+    cpu_pct = safe_percentage(pool["status"]["vcpus-available"], pool["spec"]["vcpus"])
+    mem_pct = safe_percentage(pool["status"]["memory-available"], pool["spec"]["memory"])
+    net_pct = safe_percentage(pool["status"]["network-available"], len(pool["spec"]["topology"]["networks"]))
+
+    min_capacity = min(cpu_pct, mem_pct, net_pct)
+
+    if not RICH_AVAILABLE:
+        if min_capacity >= 0.50:
+            return "HEALTHY"
+        elif min_capacity >= 0.25:
+            return "DEGRADED"
+        else:
+            return "CRITICAL"
+
+    if min_capacity >= 0.50:
+        return Text("●", style="green bold")
+    elif min_capacity >= 0.25:
+        return Text("●", style="yellow bold")
+    else:
+        return Text("●", style="red bold")
+
+def printStatusRich(includeExcluded, sortBy="name"):
+    """Print status using Rich library with colored, formatted output."""
+    console = Console()
     singleTenantCount, multiTenantCount = getNetworkCounts()
 
     # Prepare pool list based on includeExcluded flag
@@ -136,6 +219,138 @@ def printStatus(includeExcluded):
         filteredPools = pools
     else:
         filteredPools = [p for p in pools if not p["spec"]["exclude"]]
+
+    # Build lease index once to avoid N+1 queries
+    lease_index = buildLeaseIndex()
+
+    # Sort pools
+    if sortBy == "capacity":
+        filteredPools = sorted(filteredPools, key=lambda p: min(
+            safe_percentage(p["status"]["vcpus-available"], p["spec"]["vcpus"]),
+            safe_percentage(p["status"]["memory-available"], p["spec"]["memory"]),
+            safe_percentage(p["status"]["network-available"], len(p["spec"]["topology"]["networks"]))
+        ))
+    elif sortBy == "leases":
+        filteredPools = sorted(filteredPools, key=lambda p: len(lease_index.get(p["metadata"]["name"], [])), reverse=True)
+    else:
+        filteredPools = sorted(filteredPools, key=lambda p: p["metadata"]["name"])
+
+    # Calculate summary statistics
+    totalPools = len(filteredPools)
+    activePools = sum(1 for p in filteredPools if not p["spec"]["noSchedule"] and not p["spec"]["exclude"])
+    cordonedPools = sum(1 for p in filteredPools if p["spec"]["noSchedule"])
+    excludedPools = sum(1 for p in filteredPools if p["spec"]["exclude"])
+
+    leaseCount, singleTenantUsage, multiTenantUsage, singleTenantPending, multiTenantPending, singleTenantPartial, multiTenantPartial = getLeaseStatus()
+
+    # Print summary banner
+    console.print()
+    summary_text = (
+        f"[bold]Total Pools:[/] {totalPools}  "
+        f"[green]Active:[/] {activePools}  "
+        f"[yellow]Cordoned:[/] {cordonedPools}  "
+        f"[red]Excluded:[/] {excludedPools}  "
+        f"[cyan]Total Leases:[/] {leaseCount}  "
+        f"[cyan]ST Usage:[/] {format(singleTenantUsage / singleTenantCount if singleTenantCount > 0 else 0, '.0%')}  "
+        f"[cyan]MT Usage:[/] {format(multiTenantUsage / multiTenantCount if multiTenantCount > 0 else 0, '.0%')}"
+    )
+    console.print(summary_text)
+    console.print()
+
+    # Create Rich table
+    table = Table(
+        title="vSphere Capacity Manager - Pool Status",
+        show_lines=True,
+        title_style="bold cyan"
+    )
+
+    table.add_column("Health", justify="center", style="bold", no_wrap=True)
+    table.add_column("Pool Name", style="cyan bold", no_wrap=True)
+    table.add_column("CPU", justify="right", no_wrap=True)
+    table.add_column("Memory", justify="right", no_wrap=True)
+    table.add_column("Network", justify="right", no_wrap=True)
+    table.add_column("Leases", justify="center", no_wrap=True)
+    table.add_column("Cordoned", justify="center", no_wrap=True)
+    table.add_column("Excluded", justify="center", no_wrap=True)
+
+    for pool in filteredPools:
+        # Get number of leases associated with this pool from index
+        leases = lease_index.get(pool["metadata"]["name"], [])
+
+        cpu_pct = safe_percentage(pool["status"]["vcpus-available"], pool["spec"]["vcpus"])
+        mem_pct = safe_percentage(pool["status"]["memory-available"], pool["spec"]["memory"])
+        net_pct = safe_percentage(pool["status"]["network-available"], len(pool["spec"]["topology"]["networks"]))
+
+        health = getHealthIndicator(pool)
+        cpu_text = formatPercentageRich(cpu_pct, "")
+        mem_text = formatPercentageRich(mem_pct, "")
+        net_text = formatPercentageRich(net_pct, "")
+
+        lease_text = Text(str(len(leases)), style="bold" if len(leases) > 0 else "dim")
+        cordoned = getBoolSymbol(pool["spec"]["noSchedule"])
+        excluded = getBoolSymbol(pool["spec"]["exclude"])
+
+        table.add_row(
+            health,
+            pool["metadata"]["name"],
+            cpu_text,
+            mem_text,
+            net_text,
+            lease_text,
+            cordoned,
+            excluded
+        )
+
+    console.print(table)
+    console.print()
+
+    # Print lease statistics
+    lease_stats = (
+        f"[bold cyan]Lease Statistics:[/]\n"
+        f"  Total: {leaseCount}  "
+        f"Single-Tenant: {singleTenantUsage}  "
+        f"Multi-Tenant: {multiTenantUsage}\n"
+        f"  [yellow]Pending:[/] {singleTenantPending + multiTenantPending} "
+        f"(ST: {singleTenantPending}, MT: {multiTenantPending})  "
+        f"[yellow]Partial:[/] {singleTenantPartial + multiTenantPartial} "
+        f"(ST: {singleTenantPartial}, MT: {multiTenantPartial})"
+    )
+    console.print(lease_stats)
+    console.print()
+
+def printStatus(includeExcluded, outputFormat="plain", sortBy="name"):
+    """Print status with support for multiple output formats."""
+    if outputFormat == "rich" and RICH_AVAILABLE:
+        printStatusRich(includeExcluded, sortBy)
+        return
+    elif outputFormat == "json":
+        printStatusJSON(includeExcluded, sortBy)
+        return
+
+    # Original plain text output
+    singleTenantCount, multiTenantCount = getNetworkCounts()
+
+    # Prepare pool list based on includeExcluded flag
+    pools = getPools()
+    if includeExcluded:
+        filteredPools = pools
+    else:
+        filteredPools = [p for p in pools if not p["spec"]["exclude"]]
+
+    # Build lease index once to avoid N+1 queries
+    lease_index = buildLeaseIndex()
+
+    # Sort pools
+    if sortBy == "capacity":
+        filteredPools = sorted(filteredPools, key=lambda p: min(
+            safe_percentage(p["status"]["vcpus-available"], p["spec"]["vcpus"]),
+            safe_percentage(p["status"]["memory-available"], p["spec"]["memory"]),
+            safe_percentage(p["status"]["network-available"], len(p["spec"]["topology"]["networks"]))
+        ))
+    elif sortBy == "leases":
+        filteredPools = sorted(filteredPools, key=lambda p: len(lease_index.get(p["metadata"]["name"], [])), reverse=True)
+    else:
+        filteredPools = sorted(filteredPools, key=lambda p: p["metadata"]["name"])
 
     nameMaxLen = 0
     for pool in filteredPools:
@@ -146,33 +361,95 @@ def printStatus(includeExcluded):
     cordonLen = len("cordoned") + 2
     excludedLen = len("excluded") + 2
     usageLen = 20
-    header = "+".ljust(nameMaxLen,"-") + "+".ljust(usageLen,"-") + "+".ljust(cordonLen+1, "-") + "+".ljust(excludedLen+1, "-") + "+"        
+    header = "+".ljust(nameMaxLen,"-") + "+".ljust(usageLen,"-") + "+".ljust(cordonLen+1, "-") + "+".ljust(excludedLen+1, "-") + "+"
     print(header)
     print("| Pool Name".ljust(nameMaxLen) + "| Avail Capacity".ljust(usageLen) + "| Cordoned".ljust(cordonLen+1) + "| Excluded".ljust(excludedLen+1) + "|")
     print(header)
-    header = "+".ljust(nameMaxLen,"-") + "+".ljust(usageLen,"-") + "+".ljust(cordonLen+1, "-") + "+".ljust(excludedLen+1, "-") + "+"    
+    header = "+".ljust(nameMaxLen,"-") + "+".ljust(usageLen,"-") + "+".ljust(cordonLen+1, "-") + "+".ljust(excludedLen+1, "-") + "+"
     for pool in filteredPools:
-        # Get number of leases associated with this pool
-        leases = getLeasesForPool(pool["metadata"]["name"])
+        # Get number of leases associated with this pool from index
+        leases = lease_index.get(pool["metadata"]["name"], [])
 
-        cpuUsage    = "CPU: " + format((pool["status"]["vcpus-available"] / pool["spec"]["vcpus"]), ".0%")
-        memoryUsage = "Memory: " + format((pool["status"]["memory-available"] / pool["spec"]["memory"]), ".0%")
-        networkUsage = "Network: " + format(pool["status"]["network-available"] / len(pool["spec"]["topology"]["networks"]), ".0%")
-        leaseCount = "Leases: " + str(len(leases))
+        cpuUsage    = "CPU: " + format(safe_percentage(pool["status"]["vcpus-available"], pool["spec"]["vcpus"]), ".0%")
+        memoryUsage = "Memory: " + format(safe_percentage(pool["status"]["memory-available"], pool["spec"]["memory"]), ".0%")
+        networkUsage = "Network: " + format(safe_percentage(pool["status"]["network-available"], len(pool["spec"]["topology"]["networks"])), ".0%")
+        poolLeaseCount = "Leases: " + str(len(leases))
 
         print("| " + pool["metadata"]["name"].ljust(nameMaxLen-2) + "| " + cpuUsage.ljust(usageLen-2) + "| " + str(pool["spec"]["noSchedule"]).ljust(cordonLen-1) + "| " + str(pool["spec"]["exclude"]) .ljust(excludedLen-1) + "|")
         print("| ".ljust(nameMaxLen) + "| " + memoryUsage.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
         print("| ".ljust(nameMaxLen) + "| " + networkUsage.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
-        print("| ".ljust(nameMaxLen) + "| " + leaseCount.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
-        print(header)        
+        print("| ".ljust(nameMaxLen) + "| " + poolLeaseCount.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
+        print(header)
 
     leaseCount, singleTenantUsage, multiTenantUsage, singleTenantPending, multiTenantPending, singleTenantPartial, multiTenantPartial = getLeaseStatus()
 
     # Print lease counts
-    print("\nLease Count: " + str(leaseCount) + ", single-tenant usage: " + str(format(singleTenantUsage / singleTenantCount, ".0%")) + ", multi-tenant usage: " + str(format(multiTenantUsage / multiTenantCount, ".0%")))
+    print("\nLease Count: " + str(leaseCount) + ", single-tenant usage: " + str(format(singleTenantUsage / singleTenantCount if singleTenantCount > 0 else 0, ".0%")) + ", multi-tenant usage: " + str(format(multiTenantUsage / multiTenantCount if multiTenantCount > 0 else 0, ".0%")))
     # Print CI lease usage
     print("Pending Leases: " + str(singleTenantPending + multiTenantPending) + ", pending single-tenant: " + str(singleTenantPending) + ", pending multi-tenant: " + str(multiTenantPending))
     print("Partial Leases: " + str(singleTenantPartial + multiTenantPartial) + ", partial single-tenant: " + str(singleTenantPartial) + ", partial multi-tenant: " + str(multiTenantPartial))
+
+def printStatusJSON(includeExcluded, sortBy="name"):
+    """Print status as JSON for machine consumption."""
+    singleTenantCount, multiTenantCount = getNetworkCounts()
+    pools = getPools()
+
+    if not includeExcluded:
+        pools = [p for p in pools if not p["spec"]["exclude"]]
+
+    leaseCount, singleTenantUsage, multiTenantUsage, singleTenantPending, multiTenantPending, singleTenantPartial, multiTenantPartial = getLeaseStatus()
+
+    # Build lease index once to avoid N+1 queries
+    lease_index = buildLeaseIndex()
+
+    # Sort pools
+    if sortBy == "capacity":
+        pools = sorted(pools, key=lambda p: min(
+            safe_percentage(p["status"]["vcpus-available"], p["spec"]["vcpus"]),
+            safe_percentage(p["status"]["memory-available"], p["spec"]["memory"]),
+            safe_percentage(p["status"]["network-available"], len(p["spec"]["topology"]["networks"]))
+        ))
+    elif sortBy == "leases":
+        pools = sorted(pools, key=lambda p: len(lease_index.get(p["metadata"]["name"], [])), reverse=True)
+    else:
+        pools = sorted(pools, key=lambda p: p["metadata"]["name"])
+
+    output = {
+        "summary": {
+            "total_pools": len(pools),
+            "active_pools": sum(1 for p in pools if not p["spec"]["noSchedule"] and not p["spec"]["exclude"]),
+            "cordoned_pools": sum(1 for p in pools if p["spec"]["noSchedule"]),
+            "excluded_pools": sum(1 for p in pools if p["spec"]["exclude"]),
+            "total_leases": leaseCount,
+            "single_tenant_usage": singleTenantUsage,
+            "multi_tenant_usage": multiTenantUsage,
+            "single_tenant_usage_pct": singleTenantUsage / singleTenantCount if singleTenantCount > 0 else 0,
+            "multi_tenant_usage_pct": multiTenantUsage / multiTenantCount if multiTenantCount > 0 else 0,
+            "pending_leases": singleTenantPending + multiTenantPending,
+            "partial_leases": singleTenantPartial + multiTenantPartial
+        },
+        "pools": []
+    }
+
+    for pool in pools:
+        leases = lease_index.get(pool["metadata"]["name"], [])
+        cpu_pct = safe_percentage(pool["status"]["vcpus-available"], pool["spec"]["vcpus"])
+        mem_pct = safe_percentage(pool["status"]["memory-available"], pool["spec"]["memory"])
+        net_pct = safe_percentage(pool["status"]["network-available"], len(pool["spec"]["topology"]["networks"]))
+
+        pool_data = {
+            "name": pool["metadata"]["name"],
+            "cpu_available_pct": round(cpu_pct, 3),
+            "memory_available_pct": round(mem_pct, 3),
+            "network_available_pct": round(net_pct, 3),
+            "lease_count": len(leases),
+            "cordoned": pool["spec"]["noSchedule"],
+            "excluded": pool["spec"]["exclude"],
+            "health": "healthy" if min(cpu_pct, mem_pct, net_pct) >= 0.5 else "degraded" if min(cpu_pct, mem_pct, net_pct) >= 0.25 else "critical"
+        }
+        output["pools"].append(pool_data)
+
+    print(json.dumps(output, indent=2))
 
 def dropPortGroupFromPools(portGroup, poolName):
     if poolName == "":
@@ -474,6 +751,8 @@ def main():
     # Status command
     parser_status = subparsers.add_parser("status", help="Get status of the capacity manager")
     parser_status.add_argument("--include-excluded", action='store_true', required=False, help="Include pools marked as 'excluded' in the status output.")
+    parser_status.add_argument("--format", choices=["plain", "rich", "json"], default="rich" if RICH_AVAILABLE else "plain", help="Output format (default: rich if available, otherwise plain)")
+    parser_status.add_argument("--sort", choices=["name", "capacity", "leases"], default="name", help="Sort pools by name, capacity, or lease count (default: name)")
 
     parser_networks = subparsers.add_parser("networks", help="List networks")
     parser_networks.add_argument("--networkType", required=False, help="Specify the type of network to display")
@@ -508,7 +787,9 @@ def main():
     elif args.command == "drop-vlan":
         dropPortGroupFromPools(args.vlan, args.pool)
     elif args.command == "status":
-        printStatus(args.include_excluded)
+        output_format = getattr(args, 'format', 'rich' if RICH_AVAILABLE else 'plain')
+        sort_by = getattr(args, 'sort', 'name')
+        printStatus(args.include_excluded, output_format, sort_by)
     elif args.command == "networks":
         listNetworks(args.networkType)
     elif args.command == "split-network":
