@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 
 	generator "github.com/docker/docker/pkg/namesgenerator"
 	"github.com/prometheus/client_golang/prometheus"
@@ -89,10 +90,27 @@ func (l *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 	}
 
+	poolUpdateNeeded := false
 	// Set ShortName for pools that do not have it set.  This should only be older configs.
 	if len(pool.Spec.ShortName) == 0 {
-		pool.Spec.ShortName = generator.GetRandomName(0)
+		// TODO - Need to enhance this logic to make sure generator does not come up w/ a name that is already in use
+		//        There has been a case where two pools ended up w/ same shortName.
+		pool.Spec.ShortName = strings.ReplaceAll(generator.GetRandomName(0), "_", "-")
 		log.Printf("Setting ShortName for pool %v to %v\n", pool.Name, pool.Spec.ShortName)
+		poolUpdateNeeded = true
+	}
+
+	// We are doing this separate from the call above for now due to existing pools may have short names with this invalid
+	// character in it.  This will cause issues in the installer if zone name used in control plane / compute pool zone
+	// configuration.
+	if strings.Contains(pool.Spec.ShortName, "_") {
+		pool.Spec.ShortName = strings.ReplaceAll(pool.Spec.ShortName, "_", "-")
+		log.Printf("Updating ShortName for pool %v to %v\n", pool.Name, pool.Spec.ShortName)
+		poolUpdateNeeded = true
+	}
+
+	// Moved update out of above info to reduce updates.
+	if poolUpdateNeeded {
 		err := l.Client.Update(ctx, pool)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("error setting pool short name: %w", err)
