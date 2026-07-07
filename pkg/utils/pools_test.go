@@ -852,6 +852,80 @@ func TestGetFittingPools(t *testing.T) {
 				"pool-excluded": PoolVCenterLimitReached,
 			},
 		},
+		{
+			name: "vcenter check reports correct reason when pool has NoSchedule",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{
+					VCpus:  16,
+					Memory: 32,
+				},
+			},
+			excludedVCenters: map[string]bool{
+				"vcenter1.example.com": true,
+			},
+			pools: []*v1.Pool{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "pool-noschedule",
+					},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:      100,
+						NoSchedule: true, // This should be reported instead of vcenter limit
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  50,
+						MemoryAvailable: 100,
+					},
+				},
+			},
+			expectedFittingLen: 0,
+			expectedRejections: map[string]string{
+				// Should report NoSchedule, not PoolVCenterLimitReached
+				"pool-noschedule": PoolNotSchedulable,
+			},
+		},
+		{
+			name: "vcenter check reports correct reason when pool is excluded",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{
+					VCpus:  16,
+					Memory: 32,
+				},
+			},
+			excludedVCenters: map[string]bool{
+				"vcenter1.example.com": true,
+			},
+			pools: []*v1.Pool{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "pool-excluded",
+					},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:   100,
+						Exclude: true, // This should be reported instead of vcenter limit
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  50,
+						MemoryAvailable: 100,
+					},
+				},
+			},
+			expectedFittingLen: 0,
+			expectedRejections: map[string]string{
+				// Should report Exclude, not PoolVCenterLimitReached
+				"pool-excluded": PoolExcluded,
+			},
+		},
 	}
 
 	for _, tt := range tests {

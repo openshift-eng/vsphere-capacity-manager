@@ -11,13 +11,13 @@ import (
 )
 
 const (
-	PoolNotSchedulable     = "Pool not schedulable"
-	PoolExcluded           = "Pool marked as excluded"
-	PoolNotMatchRequired   = "Pool does not match required"
-	PoolInsufficientVCPU   = "Insufficient VCPU"
-	PoolInsufficientMemory = "Insufficient memory"
-	PoolLabelMismatch      = "Pool labels do not match poolSelector"
-	PoolTaintNotTolerated  = "Pool has taints not tolerated by lease"
+	PoolNotSchedulable      = "Pool not schedulable"
+	PoolExcluded            = "Pool marked as excluded"
+	PoolNotMatchRequired    = "Pool does not match required"
+	PoolInsufficientVCPU    = "Insufficient VCPU"
+	PoolInsufficientMemory  = "Insufficient memory"
+	PoolLabelMismatch       = "Pool labels do not match poolSelector"
+	PoolTaintNotTolerated   = "Pool has taints not tolerated by lease"
 	PoolVCenterLimitReached = "Pool vCenter limit reached"
 )
 
@@ -128,12 +128,6 @@ func GetFittingPools(lease *v1.Lease, pools []*v1.Pool, excludedVCenters map[str
 			continue
 		}
 
-		// If a vCenter cap is in effect, skip pools on excluded vCenters
-		if len(excludedVCenters) > 0 && excludedVCenters[pool.Spec.Server] {
-			poolResults = append(poolResults, &PoolFittingInfo{Pool: pool, MatchResults: PoolVCenterLimitReached})
-			continue
-		}
-
 		if pool.Spec.NoSchedule {
 			poolResults = append(poolResults, &PoolFittingInfo{Pool: pool, MatchResults: PoolNotSchedulable})
 			continue
@@ -155,6 +149,14 @@ func GetFittingPools(lease *v1.Lease, pools []*v1.Pool, excludedVCenters map[str
 		// Check if lease tolerates all pool taints
 		if !leaseToleratesPoolTaints(lease, pool) {
 			poolResults = append(poolResults, &PoolFittingInfo{Pool: pool, MatchResults: PoolTaintNotTolerated})
+			continue
+		}
+
+		// If a vCenter cap is in effect, skip pools on excluded vCenters
+		// This check comes after fundamental pool properties and lease requirements
+		// to ensure more specific rejection reasons are reported first
+		if len(excludedVCenters) > 0 && excludedVCenters[pool.Spec.Server] {
+			poolResults = append(poolResults, &PoolFittingInfo{Pool: pool, MatchResults: PoolVCenterLimitReached})
 			continue
 		}
 		if int(pool.Status.VCpusAvailable) >= lease.Spec.VCpus &&
