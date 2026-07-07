@@ -131,6 +131,15 @@ spec:
                       type: string
                   type: object
                 type: array
+              vcenters:
+                description: 'VCenters is the maximum number of distinct vCenters
+                  (identified by Server FQDN) to use when fulfilling this lease. When
+                  0 or unset, no limit is applied. This acts as a cap on vcenter diversity
+                  across all assigned pools. For example, a lease with pools: 4 and
+                  vcenters: 3 will assign 4 pools but draw them from at most 3 distinct
+                  vCenters.'
+                minimum: 0
+                type: integer
               vcpus:
                 description: VCpus is the number of virtual CPUs allocated for this
                   lease

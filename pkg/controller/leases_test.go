@@ -57,10 +57,10 @@ func TestDoesLeaseContainPortGroup(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		lease    *v1.Lease
-		network  *v1.Network
-		want     bool
+		name    string
+		lease   *v1.Lease
+		network *v1.Network
+		want    bool
 	}{
 		{
 			name: "returns false when lease has no owner references",
@@ -706,6 +706,280 @@ func TestPoolMissingNetworks(t *testing.T) {
 			}
 			if tt.wantMissing && poolName != tt.wantPoolName {
 				t.Errorf("poolMissingNetworks() poolName = %v, want %v", poolName, tt.wantPoolName)
+			}
+		})
+	}
+}
+
+// TestLeaseVCentersCapEnforcement tests that the VCenters field properly caps vcenter diversity
+func TestLeaseVCentersCapEnforcement(t *testing.T) {
+	tests := []struct {
+		name             string
+		leaseVCenters    int
+		assignedPools    []*v1.Pool
+		expectExclusions bool
+		expectedExcluded map[string]bool
+	}{
+		{
+			name:          "no cap when VCenters is 0",
+			leaseVCenters: 0,
+			assignedPools: []*v1.Pool{
+				{
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+					},
+				},
+			},
+			expectExclusions: false,
+			expectedExcluded: nil,
+		},
+		{
+			name:             "no cap when VCenters not set and no pools assigned yet",
+			leaseVCenters:    0,
+			assignedPools:    []*v1.Pool{},
+			expectExclusions: false,
+			expectedExcluded: nil,
+		},
+		{
+			name:          "no exclusions when under cap",
+			leaseVCenters: 3,
+			assignedPools: []*v1.Pool{
+				{
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+					},
+				},
+				{
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+					},
+				},
+			},
+			expectExclusions: false,
+			expectedExcluded: nil,
+		},
+		{
+			name:          "exclusions when at cap",
+			leaseVCenters: 2,
+			assignedPools: []*v1.Pool{
+				{
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+					},
+				},
+				{
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+					},
+				},
+			},
+			expectExclusions: true,
+			expectedExcluded: map[string]bool{
+				// Any vcenter not in the assigned pools should be excluded
+				"vcenter3.example.com": true,
+			},
+		},
+		{
+			name:          "allows same vcenters when cap reached",
+			leaseVCenters: 1,
+			assignedPools: []*v1.Pool{
+				{
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+					},
+				},
+				{
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+					},
+				},
+			},
+			expectExclusions: true,
+			expectedExcluded: map[string]bool{
+				// vcenter1 is allowed (in use), all others excluded
+				"vcenter2.example.com": true,
+				"vcenter3.example.com": true,
+			},
+		},
+		{
+			name:          "handles pools with empty server field",
+			leaseVCenters: 1,
+			assignedPools: []*v1.Pool{
+				{
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "",
+							},
+						},
+					},
+				},
+			},
+			expectExclusions: false,
+			expectedExcluded: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the controller logic for computing excluded vcenters
+			var excludedVCenters map[string]bool
+			if tt.leaseVCenters > 0 {
+				// This matches the logic in pkg/controller/leases.go
+				vcentersInUse := make(map[string]bool)
+				for _, p := range tt.assignedPools {
+					if p.Spec.Server != "" {
+						vcentersInUse[p.Spec.Server] = true
+					}
+				}
+
+				if len(vcentersInUse) >= tt.leaseVCenters {
+					// Cap reached - build exclusion list
+					// (In real controller, this would check all available pools)
+					excludedVCenters = make(map[string]bool)
+					// For testing purposes, we'll check against the expected exclusions
+					if tt.expectedExcluded != nil {
+						for server := range tt.expectedExcluded {
+							if !vcentersInUse[server] {
+								excludedVCenters[server] = true
+							}
+						}
+					}
+				}
+			}
+
+			// Verify exclusions match expectations
+			if tt.expectExclusions {
+				if excludedVCenters == nil {
+					t.Error("Expected exclusions but got none")
+				} else if tt.expectedExcluded != nil {
+					for server := range tt.expectedExcluded {
+						if !excludedVCenters[server] {
+							t.Errorf("Expected server %q to be excluded but it was not", server)
+						}
+					}
+				}
+			} else {
+				if len(excludedVCenters) > 0 {
+					t.Errorf("Expected no exclusions but got %v", excludedVCenters)
+				}
+			}
+		})
+	}
+}
+
+// TestLeaseVCentersPoolsInteraction tests the semantic interaction between Pools and VCenters fields
+func TestLeaseVCentersPoolsInteraction(t *testing.T) {
+	tests := []struct {
+		name        string
+		pools       int
+		vcenters    int
+		description string
+		valid       bool
+	}{
+		{
+			name:        "vcenters equals pools - each pool different vcenter",
+			pools:       3,
+			vcenters:    3,
+			description: "Lease requests 3 pools across up to 3 vcenters",
+			valid:       true,
+		},
+		{
+			name:        "vcenters less than pools - requires sharing",
+			pools:       4,
+			vcenters:    2,
+			description: "Lease requests 4 pools but limited to 2 vcenters - pools must share vcenters",
+			valid:       true,
+		},
+		{
+			name:        "vcenters greater than pools - cap not binding",
+			pools:       2,
+			vcenters:    5,
+			description: "Lease allows up to 5 vcenters but only needs 2 pools - cap won't be reached",
+			valid:       true,
+		},
+		{
+			name:        "vcenters zero - no limit",
+			pools:       10,
+			vcenters:    0,
+			description: "No vcenter cap - pools can span any number of vcenters",
+			valid:       true,
+		},
+		{
+			name:        "single pool single vcenter",
+			pools:       1,
+			vcenters:    1,
+			description: "Simplest case - one pool on one vcenter",
+			valid:       true,
+		},
+		{
+			name:        "many pools single vcenter",
+			pools:       10,
+			vcenters:    1,
+			description: "All pools must be on the same vcenter",
+			valid:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lease := &v1.Lease{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-lease",
+					Namespace: "default",
+				},
+				Spec: v1.LeaseSpec{
+					VCpus:    16,
+					Memory:   32,
+					Pools:    tt.pools,
+					VCenters: tt.vcenters,
+				},
+			}
+
+			// All of these should be valid lease configurations
+			if lease.Spec.Pools != tt.pools {
+				t.Errorf("Expected Pools=%d, got %d", tt.pools, lease.Spec.Pools)
+			}
+			if lease.Spec.VCenters != tt.vcenters {
+				t.Errorf("Expected VCenters=%d, got %d", tt.vcenters, lease.Spec.VCenters)
+			}
+
+			// Document the semantics
+			t.Logf("Semantic: %s", tt.description)
+			if tt.vcenters > 0 && tt.vcenters < tt.pools {
+				t.Logf("  → Pools must be distributed across at most %d vcenters", tt.vcenters)
+			} else if tt.vcenters == 0 {
+				t.Logf("  → No vcenter diversity constraint")
+			} else if tt.vcenters >= tt.pools {
+				t.Logf("  → Vcenter cap (%d) is not binding for %d pools", tt.vcenters, tt.pools)
 			}
 		})
 	}

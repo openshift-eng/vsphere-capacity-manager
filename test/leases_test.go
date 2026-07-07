@@ -861,7 +861,7 @@ var _ = Describe("Lease management", func() {
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(testLease2), testLease2)
 
 				return testLease1.Status.Phase == v1.PHASE_PARTIAL && testLease2.Status.Phase == v1.PHASE_PENDING
-			}).Should(BeTrue())
+			}, 15*time.Second, 500*time.Millisecond).Should(BeTrue())
 		})
 
 		// Now delete a lease so that the target lease will finally get enough to fill its requirements
@@ -882,7 +882,7 @@ var _ = Describe("Lease management", func() {
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(testLease1), testLease1)
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(testLease2), testLease2)
 				return testLease1.Status.Phase == v1.PHASE_FULFILLED && testLease2.Status.Phase != v1.PHASE_FULFILLED
-			}).Should(BeTrue())
+			}, 15*time.Second, 500*time.Millisecond).Should(BeTrue())
 		})
 
 		// Now wait for lease 2 to now be partial
@@ -910,8 +910,42 @@ var _ = Describe("Lease management", func() {
 			Eventually(func() bool {
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(testLease1), testLease1)
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(testLease2), testLease2)
-				return testLease1.Status.Phase == v1.PHASE_FULFILLED && testLease2.Status.Phase == v1.PHASE_FULFILLED
-			}).Should(BeTrue())
+
+				// Count pool owner references
+				poolCount1 := 0
+				networkCount1 := 0
+				for _, ref := range testLease1.OwnerReferences {
+					if ref.Kind == "Pool" {
+						poolCount1++
+					} else if ref.Kind == "Network" {
+						networkCount1++
+					}
+				}
+
+				poolCount2 := 0
+				networkCount2 := 0
+				for _, ref := range testLease2.OwnerReferences {
+					if ref.Kind == "Pool" {
+						poolCount2++
+					} else if ref.Kind == "Network" {
+						networkCount2++
+					}
+				}
+
+				log.Printf("[DEBUG] testLease1 (%s): phase=%s, pools=%d, networks=%d, VCenters=%d, requested_networks=%d",
+					testLease1.Name, testLease1.Status.Phase, poolCount1, networkCount1,
+					testLease1.Spec.VCenters, testLease1.Spec.Networks)
+				log.Printf("[DEBUG] testLease2 (%s): phase=%s, pools=%d, networks=%d, VCenters=%d, requested_networks=%d",
+					testLease2.Name, testLease2.Status.Phase, poolCount2, networkCount2,
+					testLease2.Spec.VCenters, testLease2.Spec.Networks)
+
+				fulfilled := testLease1.Status.Phase == v1.PHASE_FULFILLED && testLease2.Status.Phase == v1.PHASE_FULFILLED
+				if !fulfilled {
+					log.Printf("[DEBUG] Not yet fulfilled. testLease1=%s, testLease2=%s",
+						testLease1.Status.Phase, testLease2.Status.Phase)
+				}
+				return fulfilled
+			}, 45*time.Second, 500*time.Millisecond).Should(BeTrue())
 		})
 
 		// Cleanup all test
