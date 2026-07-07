@@ -80,6 +80,14 @@ type LeaseSpec struct {
 	// +kubebuilder:default=1
 	// +optional
 	Pools int `json:"pools,omitempty"`
+	// VCenters is the maximum number of distinct vCenters (identified by Server FQDN)
+	// to use when fulfilling this lease. When 0 or unset, no limit is applied.
+	// This acts as a cap on vcenter diversity across all assigned pools.
+	// For example, a lease with pools: 4 and vcenters: 3 will assign 4 pools but
+	// draw them from at most 3 distinct vCenters.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	VCenters int `json:"vcenters,omitempty"`
 	// Storage is the amount of storage in GB allocated for this lease
 	// +optional
 	Storage int `json:"storage,omitempty"`

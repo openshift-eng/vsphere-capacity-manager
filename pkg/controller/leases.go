@@ -768,10 +768,29 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			}
 		}
 
+		// Enforce the vCenters cap: if the lease specifies a maximum number of distinct
+		// vCenters and we have already reached that limit, restrict future pool assignments
+		// to the vCenters already in use.
+		var excludedVCenters map[string]bool
+		if lease.Spec.VCenters > 0 {
+			vcentersInUse := utils.GetVCentersInUse(assignedPools)
+			log.Printf("Lease %s has vcenters cap %d, currently using %d vcenters: %v", lease.Name, lease.Spec.VCenters, len(vcentersInUse), vcentersInUse)
+			if len(vcentersInUse) >= lease.Spec.VCenters {
+				// Cap reached — only allow pools from vCenters already in use
+				excludedVCenters = make(map[string]bool)
+				for _, p := range updatedPools {
+					srv := p.Spec.Server
+					if srv != "" && !vcentersInUse[srv] {
+						excludedVCenters[srv] = true
+					}
+				}
+			}
+		}
+
 		log.Printf("Attempting to assign pool %d/%d for lease %s, %d pools available after filtering", len(assignedPools)+1, requiredPools, lease.Name, len(availablePools))
 		log.Printf("Lease %s currently has %d owner references before GetPoolWithStrategy", lease.Name, len(lease.OwnerReferences))
 
-		pool, err := utils.GetPoolWithStrategy(lease, availablePools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED)
+		pool, err := utils.GetPoolWithStrategy(lease, availablePools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED, excludedVCenters)
 		if err != nil {
 			// If we already have some pools assigned, mark as partial
 			if len(assignedPools) > 0 {

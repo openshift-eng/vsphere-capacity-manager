@@ -18,6 +18,7 @@ const (
 	PoolInsufficientMemory = "Insufficient memory"
 	PoolLabelMismatch      = "Pool labels do not match poolSelector"
 	PoolTaintNotTolerated  = "Pool has taints not tolerated by lease"
+	PoolVCenterLimitReached = "Pool vCenter limit reached"
 )
 
 type PoolFittingInfo struct {
@@ -92,10 +93,24 @@ func poolMatchesSelector(lease *v1.Lease, pool *v1.Pool) bool {
 	return true
 }
 
+// GetVCentersInUse returns the set of distinct vCenter Server FQDNs already used
+// by the given pools (e.g., a lease's currently-assigned pools).
+func GetVCentersInUse(assignedPools []*v1.Pool) map[string]bool {
+	vcenters := make(map[string]bool)
+	for _, pool := range assignedPools {
+		if pool.Spec.Server != "" {
+			vcenters[pool.Spec.Server] = true
+		}
+	}
+	return vcenters
+}
+
 // GetFittingPools returns a list of pools that have enough resources to satisfy the resource requirements and a list of
 // PoolFittingInfo specifying why pool is not a match.
 // The list is sorted by the sum of the resource usage of the pool. The pool with the least resource usage is first.
-func GetFittingPools(lease *v1.Lease, pools []*v1.Pool) ([]*v1.Pool, []*PoolFittingInfo) {
+// excludedVCenters is an optional set of vCenter Server FQDNs to exclude from consideration (used to enforce
+// the lease's VCenters cap). Pass nil or an empty map for no vcenter constraint.
+func GetFittingPools(lease *v1.Lease, pools []*v1.Pool, excludedVCenters map[string]bool) ([]*v1.Pool, []*PoolFittingInfo) {
 	var fittingPools []*v1.Pool
 	poolResults := []*PoolFittingInfo{}
 
@@ -110,6 +125,12 @@ func GetFittingPools(lease *v1.Lease, pools []*v1.Pool) ([]*v1.Pool, []*PoolFitt
 		}
 		if alreadyOwned {
 			poolResults = append(poolResults, &PoolFittingInfo{Pool: pool, MatchResults: "Pool already assigned to lease"})
+			continue
+		}
+
+		// If a vCenter cap is in effect, skip pools on excluded vCenters
+		if len(excludedVCenters) > 0 && excludedVCenters[pool.Spec.Server] {
+			poolResults = append(poolResults, &PoolFittingInfo{Pool: pool, MatchResults: PoolVCenterLimitReached})
 			continue
 		}
 
@@ -181,8 +202,10 @@ func generatePoolResults(results []*PoolFittingInfo) []string {
 }
 
 // GetPoolWithStrategy returns a pool that has enough resources to satisfy the lease requirements.
-func GetPoolWithStrategy(lease *v1.Lease, pools []*v1.Pool, strategy v1.AllocationStrategy) (*v1.Pool, error) {
-	fittingPools, results := GetFittingPools(lease, pools)
+// excludedVCenters is an optional set of vCenter Server FQDNs to exclude (enforces the VCenters cap).
+// Pass nil for no vcenter constraint.
+func GetPoolWithStrategy(lease *v1.Lease, pools []*v1.Pool, strategy v1.AllocationStrategy, excludedVCenters map[string]bool) (*v1.Pool, error) {
+	fittingPools, results := GetFittingPools(lease, pools, excludedVCenters)
 
 	if len(fittingPools) == 0 {
 		return nil, fmt.Errorf("no pools available. %v", generatePoolResults(results))
