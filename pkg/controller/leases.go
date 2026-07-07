@@ -778,7 +778,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			if len(vcentersInUse) >= lease.Spec.VCenters {
 				// Cap reached — only allow pools from vCenters already in use
 				excludedVCenters = make(map[string]bool)
-				for _, p := range updatedPools {
+				for _, p := range availablePools {
 					srv := p.Spec.Server
 					if srv != "" && !vcentersInUse[srv] {
 						excludedVCenters[srv] = true
