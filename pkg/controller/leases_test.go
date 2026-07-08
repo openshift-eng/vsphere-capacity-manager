@@ -1239,6 +1239,134 @@ func TestLeaseVCenterPoolAvailability(t *testing.T) {
 			expectExclusions: false, // Should NOT exclude vcenter1 - can combine 1+2=3
 		},
 		{
+			name:          "vcenters=3 pools=4 excludes single-pool vcenters when multi-pool vcenter available",
+			requiredPools: 4,
+			vcentersLimit: 3,
+			availablePools: []*v1.Pool{
+				// vcenter1 has 3 pools - should be kept (high-pool vcenter)
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool2"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool3"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				// vcenter2 has 2 pools - should be kept (needed for top 2 vCenters = 5 pools)
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool2"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				// vcenter3 has 1 pool - should be excluded (below ceiling, not in top 2)
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter3-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter3.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				// vcenter4 has 1 pool - should be excluded (below ceiling, not in top 2)
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter4-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter4.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+			},
+			expectExclusions: true,
+			expectedExcluded: map[string]bool{
+				"vcenter3.example.com": true, // 1 pool < ceiling(4/3)=2, not in top 2
+				"vcenter4.example.com": true, // 1 pool < ceiling(4/3)=2, not in top 2
+			},
+		},
+		{
 			name:          "no exclusions when only 1 pool required",
 			requiredPools: 1,
 			vcentersLimit: 1,
@@ -1523,23 +1651,50 @@ func TestLeaseVCenterPoolAvailability(t *testing.T) {
 
 					// Only apply exclusions if we can potentially fulfill
 					if topVCentersPoolCount >= tt.requiredPools {
+						// Find minimum vCenters needed from the top
+						cumulativePoolCount := 0
+						minVCentersNeeded := 0
+						for i := 0; i < len(vcenterCounts); i++ {
+							cumulativePoolCount += vcenterCounts[i].count
+							minVCentersNeeded++
+							if cumulativePoolCount >= tt.requiredPools {
+								break
+							}
+						}
+
 						excludedVCenters = make(map[string]bool)
 
-						for _, vc := range vcenterCounts {
-							// Check if this vCenter can participate
-							othersPoolCount := 0
-							othersConsidered := 0
-							for _, other := range vcenterCounts {
-								if other.server != vc.server && othersConsidered < tt.vcentersLimit-1 {
-									othersPoolCount += other.count
-									othersConsidered++
+						if minVCentersNeeded < tt.vcentersLimit {
+							// We have slack: can be selective to avoid greedy trap
+							ceiling := (tt.requiredPools-1)/tt.vcentersLimit + 1
+
+							for i := minVCentersNeeded; i < len(vcenterCounts); i++ {
+								if vcenterCounts[i].count < ceiling {
+									excludedVCenters[vcenterCounts[i].server] = true
+									t.Logf("Excluding vcenter %s: %d pools < ceiling %d, beyond top %d",
+										vcenterCounts[i].server, vcenterCounts[i].count, ceiling, minVCentersNeeded)
 								}
 							}
+						} else {
+							// No slack: use combination-aware filtering for maintenance scenarios
+							for idx, current := range vcenterCounts {
+								// For this vCenter, find the best (vcentersLimit-1) OTHER vCenters
+								bestOthersSum := 0
+								othersCollected := 0
+								othersNeeded := tt.vcentersLimit - 1
 
-							if vc.count+othersPoolCount < tt.requiredPools {
-								excludedVCenters[vc.server] = true
-								t.Logf("Excluding vcenter %s: %d pools + %d from others = %d < %d required",
-									vc.server, vc.count, othersPoolCount, vc.count+othersPoolCount, tt.requiredPools)
+								for i := 0; i < len(vcenterCounts) && othersCollected < othersNeeded; i++ {
+									if i != idx {
+										bestOthersSum += vcenterCounts[i].count
+										othersCollected++
+									}
+								}
+
+								if current.count+bestOthersSum < tt.requiredPools {
+									excludedVCenters[current.server] = true
+									t.Logf("Excluding vcenter %s: %d pools + %d (best %d others) = %d < required %d",
+										current.server, current.count, bestOthersSum, othersNeeded, current.count+bestOthersSum, tt.requiredPools)
+								}
 							}
 						}
 					}
