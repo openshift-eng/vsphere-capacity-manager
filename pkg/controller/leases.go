@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand/v2"
 	"path"
+	"sort"
 	"strconv"
 	"time"
 
@@ -784,14 +785,108 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 						excludedVCenters[srv] = true
 					}
 				}
+			} else if lease.Spec.VCenters < requiredPools && len(assignedPools) == 0 {
+				// Special case: if we need more pools than vCenters allowed (VCenters < Pools),
+				// and we haven't assigned any pools yet, we must ensure we only pick from
+				// vCenters that can participate in a valid combination to fulfill the lease.
+				//
+				// Use greedy selection: sort vCenters by pool count descending, check if
+				// the top VCenters vCenters have enough pools total. Only exclude vCenters
+				// that cannot participate in any valid combination.
+
+				// Reuse GetFittingPools to apply consistent filtering logic
+				fittingPools, _ := utils.GetFittingPools(lease, availablePools, nil)
+
+				// Group fitting pools by vCenter and count them
+				fittingPoolsPerVCenter := make(map[string][]*v1.Pool)
+				for _, p := range fittingPools {
+					if p.Spec.Server != "" {
+						fittingPoolsPerVCenter[p.Spec.Server] = append(fittingPoolsPerVCenter[p.Spec.Server], p)
+					}
+				}
+
+				// Build sorted list of vCenters by pool count (descending)
+				type vcenterPoolCount struct {
+					server string
+					count  int
+				}
+				vcenterCounts := make([]vcenterPoolCount, 0, len(fittingPoolsPerVCenter))
+				for server, pools := range fittingPoolsPerVCenter {
+					vcenterCounts = append(vcenterCounts, vcenterPoolCount{server: server, count: len(pools)})
+				}
+				sort.Slice(vcenterCounts, func(i, j int) bool {
+					return vcenterCounts[i].count > vcenterCounts[j].count
+				})
+
+				// Calculate total pools available from top VCenters vCenters
+				topVCentersPoolCount := 0
+				numVCentersToUse := lease.Spec.VCenters
+				if numVCentersToUse > len(vcenterCounts) {
+					numVCentersToUse = len(vcenterCounts)
+				}
+				for i := 0; i < numVCentersToUse; i++ {
+					topVCentersPoolCount += vcenterCounts[i].count
+				}
+
+				// If the top VCenters vCenters don't have enough pools total, we can't fulfill
+				// In this case, keep all vCenters (no exclusions) and let the normal flow handle it
+				if topVCentersPoolCount < requiredPools {
+					log.Printf("Lease %s: top %d vCenters only have %d pools total, need %d - no exclusions applied",
+						lease.Name, numVCentersToUse, topVCentersPoolCount, requiredPools)
+				} else {
+					// We can potentially fulfill. Exclude vCenters that can't participate in any valid combination.
+					// A vCenter can participate if: when combined with the top (VCenters-1) OTHER vCenters,
+					// the total is >= requiredPools.
+					excludedVCenters = make(map[string]bool)
+
+					for _, vc := range vcenterCounts {
+						// For each vCenter, check if it can participate by combining with the best others
+						// We need to check: this vCenter + top (VCenters-1) others >= requiredPools
+						canParticipate := false
+
+						// Simple check: if this vCenter + total from top (VCenters-1) other vCenters >= requiredPools
+						othersPoolCount := 0
+						othersConsidered := 0
+						for _, other := range vcenterCounts {
+							if other.server != vc.server && othersConsidered < lease.Spec.VCenters-1 {
+								othersPoolCount += other.count
+								othersConsidered++
+							}
+						}
+
+						if vc.count+othersPoolCount >= requiredPools {
+							canParticipate = true
+						}
+
+						// Exclude vCenters that cannot participate in any valid combination
+						if !canParticipate {
+							for _, p := range availablePools {
+								if p.Spec.Server == vc.server {
+									excludedVCenters[vc.server] = true
+									break
+								}
+							}
+						}
+					}
+
+					// Log exclusions without exposing full vCenter FQDNs (count only)
+					if len(excludedVCenters) > 0 {
+						log.Printf("Lease %s: excluded %d vCenters that cannot participate in valid combinations (need %d pools from %d vCenters, top %d have %d total)",
+							lease.Name, len(excludedVCenters), requiredPools, lease.Spec.VCenters, numVCentersToUse, topVCentersPoolCount)
+					}
+				}
 			}
 		}
 
 		log.Printf("Attempting to assign pool %d/%d for lease %s, %d pools available after filtering", len(assignedPools)+1, requiredPools, lease.Name, len(availablePools))
 		log.Printf("Lease %s currently has %d owner references before GetPoolWithStrategy", lease.Name, len(lease.OwnerReferences))
+		if len(excludedVCenters) > 0 {
+			log.Printf("Lease %s: %d vCenters excluded from pool selection", lease.Name, len(excludedVCenters))
+		}
 
 		pool, err := utils.GetPoolWithStrategy(lease, availablePools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED, excludedVCenters)
 		if err != nil {
+			log.Printf("GetPoolWithStrategy error for lease %s: %v", lease.Name, err)
 			// If we already have some pools assigned, mark as partial
 			if len(assignedPools) > 0 {
 				log.Printf("lease %s needs %d pools but only %d available", lease.Name, requiredPools, len(assignedPools))
