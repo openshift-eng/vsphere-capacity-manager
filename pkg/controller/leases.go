@@ -834,45 +834,64 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 					log.Printf("Lease %s: top %d vCenters only have %d pools total, need %d - no exclusions applied",
 						lease.Name, numVCentersToUse, topVCentersPoolCount, requiredPools)
 				} else {
-					// We can potentially fulfill. Exclude vCenters that can't participate in any valid combination.
-					// A vCenter can participate if: when combined with the top (VCenters-1) OTHER vCenters,
-					// the total is >= requiredPools.
-					excludedVCenters = make(map[string]bool)
+					// We can potentially fulfill. Use a hybrid strategy that balances:
+					// 1. Allowing valid combinations (maintenance scenario)
+					// 2. Preventing greedy trap (low-pool vCenters exhausting cap)
 
-					for _, vc := range vcenterCounts {
-						// For each vCenter, check if it can participate by combining with the best others
-						// We need to check: this vCenter + top (VCenters-1) others >= requiredPools
-						canParticipate := false
-
-						// Simple check: if this vCenter + total from top (VCenters-1) other vCenters >= requiredPools
-						othersPoolCount := 0
-						othersConsidered := 0
-						for _, other := range vcenterCounts {
-							if other.server != vc.server && othersConsidered < lease.Spec.VCenters-1 {
-								othersPoolCount += other.count
-								othersConsidered++
-							}
-						}
-
-						if vc.count+othersPoolCount >= requiredPools {
-							canParticipate = true
-						}
-
-						// Exclude vCenters that cannot participate in any valid combination
-						if !canParticipate {
-							for _, p := range availablePools {
-								if p.Spec.Server == vc.server {
-									excludedVCenters[vc.server] = true
-									break
-								}
-							}
+					// Find minimum vCenters needed from the top
+					cumulativePoolCount := 0
+					minVCentersNeeded := 0
+					for i := 0; i < len(vcenterCounts); i++ {
+						cumulativePoolCount += vcenterCounts[i].count
+						minVCentersNeeded++
+						if cumulativePoolCount >= requiredPools {
+							break
 						}
 					}
 
-					// Log exclusions without exposing full vCenter FQDNs (count only)
-					if len(excludedVCenters) > 0 {
-						log.Printf("Lease %s: excluded %d vCenters that cannot participate in valid combinations (need %d pools from %d vCenters, top %d have %d total)",
-							lease.Name, len(excludedVCenters), requiredPools, lease.Spec.VCenters, numVCentersToUse, topVCentersPoolCount)
+					excludedVCenters = make(map[string]bool)
+
+					if minVCentersNeeded < lease.Spec.VCenters {
+						// We have slack (min < cap): can be selective to avoid greedy trap
+						// Keep top minVCentersNeeded, apply ceiling filter to remainder
+						ceiling := (requiredPools-1)/lease.Spec.VCenters + 1
+
+						for i := minVCentersNeeded; i < len(vcenterCounts); i++ {
+							if vcenterCounts[i].count < ceiling {
+								excludedVCenters[vcenterCounts[i].server] = true
+							}
+						}
+
+						if len(excludedVCenters) > 0 {
+							log.Printf("Lease %s: excluded %d low-pool vCenters (need %d pools from %d vCenters, top %d sufficient)",
+								lease.Name, len(excludedVCenters), requiredPools, lease.Spec.VCenters, minVCentersNeeded)
+						}
+					} else {
+						// No slack (min >= cap): use all vCenter slots, apply combination-aware filtering
+						// This handles maintenance scenarios where we need flexibility
+						for idx, current := range vcenterCounts {
+							// For this vCenter, find the best (VCenters-1) OTHER vCenters
+							bestOthersSum := 0
+							othersCollected := 0
+							othersNeeded := lease.Spec.VCenters - 1
+
+							for i := 0; i < len(vcenterCounts) && othersCollected < othersNeeded; i++ {
+								if i != idx {
+									bestOthersSum += vcenterCounts[i].count
+									othersCollected++
+								}
+							}
+
+							// Can this vCenter + best others reach the requirement?
+							if current.count+bestOthersSum < requiredPools {
+								excludedVCenters[current.server] = true
+							}
+						}
+
+						if len(excludedVCenters) > 0 {
+							log.Printf("Lease %s: excluded %d vCenters that cannot combine to reach requirement (need %d pools from %d vCenters)",
+								lease.Name, len(excludedVCenters), requiredPools, lease.Spec.VCenters)
+						}
 					}
 				}
 			}
