@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"sort"
 	"testing"
 
 	configv1 "github.com/openshift/api/config/v1"
@@ -1180,35 +1181,11 @@ func TestLeaseVCenterPoolAvailability(t *testing.T) {
 			expectExclusions: false,
 		},
 		{
-			name:          "no exclusions when only 1 pool required",
-			requiredPools: 1,
-			vcentersLimit: 1,
-			availablePools: []*v1.Pool{
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool1"},
-					Spec: v1.PoolSpec{
-						FailureDomainSpec: v1.FailureDomainSpec{
-							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
-								Server: "vcenter1.example.com",
-							},
-						},
-						VCpus:  100,
-						Memory: 1000,
-					},
-					Status: v1.PoolStatus{
-						VCpusAvailable:  100,
-						MemoryAvailable: 1000,
-					},
-				},
-			},
-			expectExclusions: false,
-		},
-		{
-			name:          "vcenters=2 pools=3 excludes vcenters with <2 pools",
+			name:          "maintenance scenario: vcenter with 1 pool combines with vcenter with 2 pools",
 			requiredPools: 3,
 			vcentersLimit: 2,
 			availablePools: []*v1.Pool{
-				// vcenter1 has only 1 pool - should be excluded (needs ceil(3/2)=2)
+				// vcenter1 had pools removed for maintenance, only 1 left
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool1"},
 					Spec: v1.PoolSpec{
@@ -1225,7 +1202,7 @@ func TestLeaseVCenterPoolAvailability(t *testing.T) {
 						MemoryAvailable: 1000,
 					},
 				},
-				// vcenter2 has 2 pools - sufficient
+				// vcenter2 has 2 pools available
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool1"},
 					Spec: v1.PoolSpec{
@@ -1258,7 +1235,89 @@ func TestLeaseVCenterPoolAvailability(t *testing.T) {
 						MemoryAvailable: 1000,
 					},
 				},
-				// vcenter3 has 2 pools - sufficient
+			},
+			expectExclusions: false, // Should NOT exclude vcenter1 - can combine 1+2=3
+		},
+		{
+			name:          "no exclusions when only 1 pool required",
+			requiredPools: 1,
+			vcentersLimit: 1,
+			availablePools: []*v1.Pool{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+			},
+			expectExclusions: false,
+		},
+		{
+			name:          "vcenters=2 pools=3 allows vcenter with 1 pool if can combine",
+			requiredPools: 3,
+			vcentersLimit: 2,
+			availablePools: []*v1.Pool{
+				// vcenter1 has 1 pool - can combine with vcenter2 (2 pools) = 3 total
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				// vcenter2 has 2 pools - can combine with vcenter1 (1 pool) = 3 total
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool2"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				// vcenter3 has 2 pools - can also combine
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "vcenter3-pool1"},
 					Spec: v1.PoolSpec{
@@ -1292,17 +1351,14 @@ func TestLeaseVCenterPoolAvailability(t *testing.T) {
 					},
 				},
 			},
-			expectExclusions: true,
-			expectedExcluded: map[string]bool{
-				"vcenter1.example.com": true, // only 1 pool, needs at least 2
-			},
+			expectExclusions: false, // No exclusions - all vCenters can participate
 		},
 		{
-			name:          "vcenters=2 pools=5 excludes vcenters with <3 pools",
+			name:          "vcenters=2 pools=5 allows vcenter with 2 pools if can combine with 3",
 			requiredPools: 5,
 			vcentersLimit: 2,
 			availablePools: []*v1.Pool{
-				// vcenter1 has 2 pools - insufficient (needs ceil(5/2)=3)
+				// vcenter1 has 2 pools - can combine with vcenter2 (3 pools) = 5 total
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool1"},
 					Spec: v1.PoolSpec{
@@ -1335,7 +1391,7 @@ func TestLeaseVCenterPoolAvailability(t *testing.T) {
 						MemoryAvailable: 1000,
 					},
 				},
-				// vcenter2 has 3 pools - sufficient
+				// vcenter2 has 3 pools - can combine with vcenter1 (2 pools) = 5 total
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool1"},
 					Spec: v1.PoolSpec{
@@ -1385,10 +1441,7 @@ func TestLeaseVCenterPoolAvailability(t *testing.T) {
 					},
 				},
 			},
-			expectExclusions: true,
-			expectedExcluded: map[string]bool{
-				"vcenter1.example.com": true, // only 2 pools, needs at least 3
-			},
+			expectExclusions: false, // No exclusions - vcenter1+vcenter2 = 5 pools
 		},
 	}
 
@@ -1424,6 +1477,7 @@ func TestLeaseVCenterPoolAvailability(t *testing.T) {
 					t.Skip("Test case is for pre-assignment filtering")
 				} else if lease.Spec.VCenters > 0 && lease.Spec.VCenters < tt.requiredPools && len(assignedPools) == 0 {
 					// This is the special case we're testing: VCenters < Pools
+					// Use the same algorithm as production code
 					fittingPoolsPerVCenter := make(map[string][]*v1.Pool)
 					for _, p := range tt.availablePools {
 						if p.Spec.Server == "" {
@@ -1444,26 +1498,49 @@ func TestLeaseVCenterPoolAvailability(t *testing.T) {
 						fittingPoolsPerVCenter[p.Spec.Server] = append(fittingPoolsPerVCenter[p.Spec.Server], p)
 					}
 
-					// Calculate minimum pools per vCenter using ceiling division
-					minPoolsPerVCenter := (tt.requiredPools + tt.vcentersLimit - 1) / tt.vcentersLimit
+					// Build sorted list of vCenters by pool count (descending)
+					type vcenterPoolCount struct {
+						server string
+						count  int
+					}
+					vcenterCounts := make([]vcenterPoolCount, 0, len(fittingPoolsPerVCenter))
+					for server, pools := range fittingPoolsPerVCenter {
+						vcenterCounts = append(vcenterCounts, vcenterPoolCount{server: server, count: len(pools)})
+					}
+					sort.Slice(vcenterCounts, func(i, j int) bool {
+						return vcenterCounts[i].count > vcenterCounts[j].count
+					})
 
-					excludedVCenters = make(map[string]bool)
-					for vcenter, pools := range fittingPoolsPerVCenter {
-						if len(pools) < minPoolsPerVCenter {
-							excludedVCenters[vcenter] = true
-							t.Logf("Excluding vcenter %s: only has %d suitable pools but needs at least %d per vCenter (total %d pools across %d vCenters)",
-								vcenter, len(pools), minPoolsPerVCenter, tt.requiredPools, tt.vcentersLimit)
-						}
+					// Calculate total pools from top VCenters vCenters
+					topVCentersPoolCount := 0
+					numVCentersToUse := tt.vcentersLimit
+					if numVCentersToUse > len(vcenterCounts) {
+						numVCentersToUse = len(vcenterCounts)
+					}
+					for i := 0; i < numVCentersToUse; i++ {
+						topVCentersPoolCount += vcenterCounts[i].count
 					}
 
-					// Also exclude vCenters not in the map (0 suitable pools)
-					seenVCenters := make(map[string]bool)
-					for vcenter := range fittingPoolsPerVCenter {
-						seenVCenters[vcenter] = true
-					}
-					for _, p := range tt.availablePools {
-						if p.Spec.Server != "" && !seenVCenters[p.Spec.Server] {
-							excludedVCenters[p.Spec.Server] = true
+					// Only apply exclusions if we can potentially fulfill
+					if topVCentersPoolCount >= tt.requiredPools {
+						excludedVCenters = make(map[string]bool)
+
+						for _, vc := range vcenterCounts {
+							// Check if this vCenter can participate
+							othersPoolCount := 0
+							othersConsidered := 0
+							for _, other := range vcenterCounts {
+								if other.server != vc.server && othersConsidered < tt.vcentersLimit-1 {
+									othersPoolCount += other.count
+									othersConsidered++
+								}
+							}
+
+							if vc.count+othersPoolCount < tt.requiredPools {
+								excludedVCenters[vc.server] = true
+								t.Logf("Excluding vcenter %s: %d pools + %d from others = %d < %d required",
+									vc.server, vc.count, othersPoolCount, vc.count+othersPoolCount, tt.requiredPools)
+							}
 						}
 					}
 				}
