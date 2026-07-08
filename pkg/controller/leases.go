@@ -789,32 +789,16 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				// and we haven't assigned any pools yet, we must ensure we only pick from
 				// vCenters that have enough pools to potentially fulfill the lease.
 				// Use a greedy heuristic: require each vCenter to have at least ceil(Pools/VCenters) pools.
-				// Get fitting pools per vCenter by doing a preliminary filter
+
+				// Reuse GetFittingPools to apply consistent filtering logic
+				fittingPools, _ := utils.GetFittingPools(lease, availablePools, nil)
+
+				// Group fitting pools by vCenter
 				fittingPoolsPerVCenter := make(map[string][]*v1.Pool)
-				for _, p := range availablePools {
-					if p.Spec.Server == "" {
-						continue
+				for _, p := range fittingPools {
+					if p.Spec.Server != "" {
+						fittingPoolsPerVCenter[p.Spec.Server] = append(fittingPoolsPerVCenter[p.Spec.Server], p)
 					}
-					// Do basic filtering to see if this pool could be assigned
-					if p.Spec.NoSchedule {
-						continue
-					}
-					if p.Spec.Exclude && lease.Spec.RequiredPool != p.ObjectMeta.Name {
-						continue
-					}
-					if len(lease.Spec.RequiredPool) > 0 && lease.Spec.RequiredPool != p.ObjectMeta.Name {
-						continue
-					}
-					if !utils.PoolMatchesSelector(lease, p) {
-						continue
-					}
-					if !utils.LeaseToleratesPoolTaints(lease, p) {
-						continue
-					}
-					if int(p.Status.VCpusAvailable) < lease.Spec.VCpus || int(p.Status.MemoryAvailable) < lease.Spec.Memory {
-						continue
-					}
-					fittingPoolsPerVCenter[p.Spec.Server] = append(fittingPoolsPerVCenter[p.Spec.Server], p)
 				}
 
 				// Calculate minimum pools per vCenter using ceiling division
@@ -824,29 +808,25 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 				// Exclude vCenters that don't have enough suitable pools
 				excludedVCenters = make(map[string]bool)
-				for vcenter, pools := range fittingPoolsPerVCenter {
-					if len(pools) < minPoolsPerVCenter {
-						excludedVCenters[vcenter] = true
-						log.Printf("Excluding vcenter %s: only has %d suitable pools but lease %s needs at least %d pools per vCenter (total %d pools across %d vCenters)",
-							vcenter, len(pools), lease.Name, minPoolsPerVCenter, requiredPools, lease.Spec.VCenters)
-					}
-				}
-				// Also exclude vCenters not in the map (they have 0 suitable pools)
-				seenVCenters := make(map[string]bool)
-				for vcenter := range fittingPoolsPerVCenter {
-					seenVCenters[vcenter] = true
-				}
 				for _, p := range availablePools {
-					if p.Spec.Server != "" && !seenVCenters[p.Spec.Server] {
+					if p.Spec.Server != "" && len(fittingPoolsPerVCenter[p.Spec.Server]) < minPoolsPerVCenter {
 						excludedVCenters[p.Spec.Server] = true
 					}
+				}
+
+				// Log exclusions without exposing full vCenter FQDNs (count only)
+				if len(excludedVCenters) > 0 {
+					log.Printf("Lease %s: excluded %d vCenters with insufficient pools (need min %d pools per vCenter for %d total pools across %d vCenters)",
+						lease.Name, len(excludedVCenters), minPoolsPerVCenter, requiredPools, lease.Spec.VCenters)
 				}
 			}
 		}
 
 		log.Printf("Attempting to assign pool %d/%d for lease %s, %d pools available after filtering", len(assignedPools)+1, requiredPools, lease.Name, len(availablePools))
 		log.Printf("Lease %s currently has %d owner references before GetPoolWithStrategy", lease.Name, len(lease.OwnerReferences))
-		log.Printf("Lease %s excludedVCenters: %v", lease.Name, excludedVCenters)
+		if len(excludedVCenters) > 0 {
+			log.Printf("Lease %s: %d vCenters excluded from pool selection", lease.Name, len(excludedVCenters))
+		}
 
 		pool, err := utils.GetPoolWithStrategy(lease, availablePools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED, excludedVCenters)
 		if err != nil {

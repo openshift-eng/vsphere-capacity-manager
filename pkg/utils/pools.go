@@ -11,15 +11,14 @@ import (
 )
 
 const (
-	PoolNotSchedulable           = "Pool not schedulable"
-	PoolExcluded                 = "Pool marked as excluded"
-	PoolNotMatchRequired         = "Pool does not match required"
-	PoolInsufficientVCPU         = "Insufficient VCPU"
-	PoolInsufficientMemory       = "Insufficient memory"
-	PoolLabelMismatch            = "Pool labels do not match poolSelector"
-	PoolTaintNotTolerated        = "Pool has taints not tolerated by lease"
-	PoolVCenterLimitReached      = "Pool vCenter limit reached"
-	PoolVCenterInsufficientPools = "vCenter does not have enough pools for lease"
+	PoolNotSchedulable      = "Pool not schedulable"
+	PoolExcluded            = "Pool marked as excluded"
+	PoolNotMatchRequired    = "Pool does not match required"
+	PoolInsufficientVCPU    = "Insufficient VCPU"
+	PoolInsufficientMemory  = "Insufficient memory"
+	PoolLabelMismatch       = "Pool labels do not match poolSelector"
+	PoolTaintNotTolerated   = "Pool has taints not tolerated by lease"
+	PoolVCenterLimitReached = "Pool vCenter limit reached"
 )
 
 type PoolFittingInfo struct {
