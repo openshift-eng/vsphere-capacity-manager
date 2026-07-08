@@ -11,14 +11,15 @@ import (
 )
 
 const (
-	PoolNotSchedulable      = "Pool not schedulable"
-	PoolExcluded            = "Pool marked as excluded"
-	PoolNotMatchRequired    = "Pool does not match required"
-	PoolInsufficientVCPU    = "Insufficient VCPU"
-	PoolInsufficientMemory  = "Insufficient memory"
-	PoolLabelMismatch       = "Pool labels do not match poolSelector"
-	PoolTaintNotTolerated   = "Pool has taints not tolerated by lease"
-	PoolVCenterLimitReached = "Pool vCenter limit reached"
+	PoolNotSchedulable           = "Pool not schedulable"
+	PoolExcluded                 = "Pool marked as excluded"
+	PoolNotMatchRequired         = "Pool does not match required"
+	PoolInsufficientVCPU         = "Insufficient VCPU"
+	PoolInsufficientMemory       = "Insufficient memory"
+	PoolLabelMismatch            = "Pool labels do not match poolSelector"
+	PoolTaintNotTolerated        = "Pool has taints not tolerated by lease"
+	PoolVCenterLimitReached      = "Pool vCenter limit reached"
+	PoolVCenterInsufficientPools = "vCenter does not have enough pools for lease"
 )
 
 type PoolFittingInfo struct {
@@ -44,9 +45,9 @@ func tolerationMatchesTaint(toleration *v1.Toleration, taint *v1.Taint) bool {
 	return toleration.Key == taint.Key && toleration.Value == taint.Value
 }
 
-// leaseToleratesPoolTaints checks if a lease has tolerations for all of a pool's taints.
+// LeaseToleratesPoolTaints checks if a lease has tolerations for all of a pool's taints.
 // Returns true if the lease can be scheduled on the pool, false otherwise.
-func leaseToleratesPoolTaints(lease *v1.Lease, pool *v1.Pool) bool {
+func LeaseToleratesPoolTaints(lease *v1.Lease, pool *v1.Pool) bool {
 	// If pool has no taints, lease can always be scheduled
 	if len(pool.Spec.Taints) == 0 {
 		return true
@@ -74,9 +75,9 @@ func leaseToleratesPoolTaints(lease *v1.Lease, pool *v1.Pool) bool {
 	return true
 }
 
-// poolMatchesSelector checks if a pool's labels match the lease's poolSelector.
+// PoolMatchesSelector checks if a pool's labels match the lease's poolSelector.
 // Returns true if all selector labels match the pool's labels.
-func poolMatchesSelector(lease *v1.Lease, pool *v1.Pool) bool {
+func PoolMatchesSelector(lease *v1.Lease, pool *v1.Pool) bool {
 	// If no selector is specified, pool matches
 	if len(lease.Spec.PoolSelector) == 0 {
 		return true
@@ -142,12 +143,12 @@ func GetFittingPools(lease *v1.Lease, pools []*v1.Pool, excludedVCenters map[str
 			continue
 		}
 		// Check if pool labels match the lease's poolSelector
-		if !poolMatchesSelector(lease, pool) {
+		if !PoolMatchesSelector(lease, pool) {
 			poolResults = append(poolResults, &PoolFittingInfo{Pool: pool, MatchResults: PoolLabelMismatch})
 			continue
 		}
 		// Check if lease tolerates all pool taints
-		if !leaseToleratesPoolTaints(lease, pool) {
+		if !LeaseToleratesPoolTaints(lease, pool) {
 			poolResults = append(poolResults, &PoolFittingInfo{Pool: pool, MatchResults: PoolTaintNotTolerated})
 			continue
 		}

@@ -896,6 +896,605 @@ func TestLeaseVCentersCapEnforcement(t *testing.T) {
 	}
 }
 
+// TestLeaseVCenterPoolAvailability tests that when VCenters=1 and Pools>1,
+// we only select from vCenters that have enough suitable pools
+func TestLeaseVCenterPoolAvailability(t *testing.T) {
+	tests := []struct {
+		name             string
+		requiredPools    int
+		vcentersLimit    int
+		availablePools   []*v1.Pool
+		expectExclusions bool
+		expectedExcluded map[string]bool
+	}{
+		{
+			name:          "vcenter with insufficient pools is excluded",
+			requiredPools: 3,
+			vcentersLimit: 1,
+			availablePools: []*v1.Pool{
+				// vcenter1 has only 1 pool - insufficient for 3 pools
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				// vcenter2 has 3 pools - sufficient for 3 pools
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool2"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool3"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+			},
+			expectExclusions: true,
+			expectedExcluded: map[string]bool{
+				"vcenter1.example.com": true, // only 1 pool, needs 3
+			},
+		},
+		{
+			name:          "vcenter with insufficient resources is excluded",
+			requiredPools: 2,
+			vcentersLimit: 1,
+			availablePools: []*v1.Pool{
+				// vcenter1 has 2 pools, but one lacks resources
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool2"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  5,  // insufficient
+						MemoryAvailable: 10, // insufficient
+					},
+				},
+				// vcenter2 has 2 pools with sufficient resources
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool2"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+			},
+			expectExclusions: true,
+			expectedExcluded: map[string]bool{
+				"vcenter1.example.com": true, // only 1 suitable pool, needs 2
+			},
+		},
+		{
+			name:          "vcenter with excluded pools counted correctly",
+			requiredPools: 2,
+			vcentersLimit: 1,
+			availablePools: []*v1.Pool{
+				// vcenter1 has 2 pools, but one is marked exclude
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool2"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:   100,
+						Memory:  1000,
+						Exclude: true, // This pool should not be counted
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				// vcenter2 has 2 schedulable pools
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool2"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+			},
+			expectExclusions: true,
+			expectedExcluded: map[string]bool{
+				"vcenter1.example.com": true, // only 1 suitable pool (pool2 is excluded), needs 2
+			},
+		},
+		{
+			name:          "no exclusions when VCenters >= Pools",
+			requiredPools: 2,
+			vcentersLimit: 3, // Can use 3 vCenters for 2 pools, no pre-filtering needed
+			availablePools: []*v1.Pool{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+			},
+			expectExclusions: false,
+		},
+		{
+			name:          "no exclusions when only 1 pool required",
+			requiredPools: 1,
+			vcentersLimit: 1,
+			availablePools: []*v1.Pool{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+			},
+			expectExclusions: false,
+		},
+		{
+			name:          "vcenters=2 pools=3 excludes vcenters with <2 pools",
+			requiredPools: 3,
+			vcentersLimit: 2,
+			availablePools: []*v1.Pool{
+				// vcenter1 has only 1 pool - should be excluded (needs ceil(3/2)=2)
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				// vcenter2 has 2 pools - sufficient
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool2"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				// vcenter3 has 2 pools - sufficient
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter3-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter3.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter3-pool2"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter3.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+			},
+			expectExclusions: true,
+			expectedExcluded: map[string]bool{
+				"vcenter1.example.com": true, // only 1 pool, needs at least 2
+			},
+		},
+		{
+			name:          "vcenters=2 pools=5 excludes vcenters with <3 pools",
+			requiredPools: 5,
+			vcentersLimit: 2,
+			availablePools: []*v1.Pool{
+				// vcenter1 has 2 pools - insufficient (needs ceil(5/2)=3)
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter1-pool2"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter1.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				// vcenter2 has 3 pools - sufficient
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool1"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool2"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "vcenter2-pool3"},
+					Spec: v1.PoolSpec{
+						FailureDomainSpec: v1.FailureDomainSpec{
+							VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+								Server: "vcenter2.example.com",
+							},
+						},
+						VCpus:  100,
+						Memory: 1000,
+					},
+					Status: v1.PoolStatus{
+						VCpusAvailable:  100,
+						MemoryAvailable: 1000,
+					},
+				},
+			},
+			expectExclusions: true,
+			expectedExcluded: map[string]bool{
+				"vcenter1.example.com": true, // only 2 pools, needs at least 3
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lease := &v1.Lease{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-lease",
+					Namespace: "default",
+				},
+				Spec: v1.LeaseSpec{
+					VCpus:    16,
+					Memory:   32,
+					Pools:    tt.requiredPools,
+					VCenters: tt.vcentersLimit,
+				},
+			}
+
+			// Simulate the controller logic for pre-filtering vCenters
+			var excludedVCenters map[string]bool
+			assignedPools := []*v1.Pool{} // No pools assigned yet
+
+			if lease.Spec.VCenters > 0 {
+				vcentersInUse := make(map[string]bool)
+				for _, p := range assignedPools {
+					if p.Spec.Server != "" {
+						vcentersInUse[p.Spec.Server] = true
+					}
+				}
+
+				if len(vcentersInUse) >= lease.Spec.VCenters {
+					// Cap already reached - not testing this case
+					t.Skip("Test case is for pre-assignment filtering")
+				} else if lease.Spec.VCenters > 0 && lease.Spec.VCenters < tt.requiredPools && len(assignedPools) == 0 {
+					// This is the special case we're testing: VCenters < Pools
+					fittingPoolsPerVCenter := make(map[string][]*v1.Pool)
+					for _, p := range tt.availablePools {
+						if p.Spec.Server == "" {
+							continue
+						}
+						if p.Spec.NoSchedule {
+							continue
+						}
+						if p.Spec.Exclude && lease.Spec.RequiredPool != p.ObjectMeta.Name {
+							continue
+						}
+						if len(lease.Spec.RequiredPool) > 0 && lease.Spec.RequiredPool != p.ObjectMeta.Name {
+							continue
+						}
+						if int(p.Status.VCpusAvailable) < lease.Spec.VCpus || int(p.Status.MemoryAvailable) < lease.Spec.Memory {
+							continue
+						}
+						fittingPoolsPerVCenter[p.Spec.Server] = append(fittingPoolsPerVCenter[p.Spec.Server], p)
+					}
+
+					// Calculate minimum pools per vCenter using ceiling division
+					minPoolsPerVCenter := (tt.requiredPools + tt.vcentersLimit - 1) / tt.vcentersLimit
+
+					excludedVCenters = make(map[string]bool)
+					for vcenter, pools := range fittingPoolsPerVCenter {
+						if len(pools) < minPoolsPerVCenter {
+							excludedVCenters[vcenter] = true
+							t.Logf("Excluding vcenter %s: only has %d suitable pools but needs at least %d per vCenter (total %d pools across %d vCenters)",
+								vcenter, len(pools), minPoolsPerVCenter, tt.requiredPools, tt.vcentersLimit)
+						}
+					}
+
+					// Also exclude vCenters not in the map (0 suitable pools)
+					seenVCenters := make(map[string]bool)
+					for vcenter := range fittingPoolsPerVCenter {
+						seenVCenters[vcenter] = true
+					}
+					for _, p := range tt.availablePools {
+						if p.Spec.Server != "" && !seenVCenters[p.Spec.Server] {
+							excludedVCenters[p.Spec.Server] = true
+						}
+					}
+				}
+			}
+
+			// Verify exclusions match expectations
+			if tt.expectExclusions {
+				if len(excludedVCenters) == 0 {
+					t.Error("Expected exclusions but got none")
+				} else if tt.expectedExcluded != nil {
+					for server := range tt.expectedExcluded {
+						if !excludedVCenters[server] {
+							t.Errorf("Expected server %q to be excluded but it was not", server)
+						}
+					}
+					// Verify we didn't exclude anything extra
+					for server := range excludedVCenters {
+						if !tt.expectedExcluded[server] {
+							t.Errorf("Server %q was excluded but should not have been", server)
+						}
+					}
+				}
+			} else {
+				if len(excludedVCenters) > 0 {
+					t.Errorf("Expected no exclusions but got %v", excludedVCenters)
+				}
+			}
+		})
+	}
+}
+
 // TestLeaseVCentersPoolsInteraction tests the semantic interaction between Pools and VCenters fields
 func TestLeaseVCentersPoolsInteraction(t *testing.T) {
 	tests := []struct {
