@@ -769,13 +769,19 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			}
 		}
 
-		// Enforce the vCenters cap: if the lease specifies a maximum number of distinct
-		// vCenters and we have already reached that limit, restrict future pool assignments
-		// to the vCenters already in use.
+		// Enforce the vCenters cap with smart filtering:
+		// 1. If cap reached: only allow vCenters already in use
+		// 2. If approaching cap with remaining pools > remaining slots: require vCenters with multiple pools
+		// 3. Initial selection (no pools assigned): pre-filter to avoid low-capacity vCenters
 		var excludedVCenters map[string]bool
 		if lease.Spec.VCenters > 0 {
 			vcentersInUse := utils.GetVCentersInUse(assignedPools)
-			log.Printf("Lease %s has vcenters cap %d, currently using %d vcenters: %v", lease.Name, lease.Spec.VCenters, len(vcentersInUse), vcentersInUse)
+			remainingVCenterSlots := lease.Spec.VCenters - len(vcentersInUse)
+			remainingPools := requiredPools - len(assignedPools)
+
+			log.Printf("Lease %s: cap=%d, using=%d, remaining_slots=%d, remaining_pools=%d",
+				lease.Name, lease.Spec.VCenters, len(vcentersInUse), remainingVCenterSlots, remainingPools)
+
 			if len(vcentersInUse) >= lease.Spec.VCenters {
 				// Cap reached — only allow pools from vCenters already in use
 				excludedVCenters = make(map[string]bool)
@@ -784,6 +790,39 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 					if srv != "" && !vcentersInUse[srv] {
 						excludedVCenters[srv] = true
 					}
+				}
+				log.Printf("Lease %s: vCenter cap reached, only allowing vCenters in use", lease.Name)
+			} else if remainingVCenterSlots > 0 && remainingPools > remainingVCenterSlots {
+				// We need multiple pools per remaining vCenter slot
+				// Apply dynamic filtering: exclude vCenters that don't have enough pools
+				minPoolsPerVCenter := (remainingPools-1)/remainingVCenterSlots + 1
+
+				log.Printf("Lease %s: need %d pools from %d remaining slots, min %d pools per vCenter required",
+					lease.Name, remainingPools, remainingVCenterSlots, minPoolsPerVCenter)
+
+				// Count fitting pools per vCenter
+				fittingPools, _ := utils.GetFittingPools(lease, availablePools, nil)
+				fittingPoolsPerVCenter := make(map[string]int)
+				for _, p := range fittingPools {
+					if p.Spec.Server != "" && !vcentersInUse[p.Spec.Server] {
+						fittingPoolsPerVCenter[p.Spec.Server]++
+					}
+				}
+
+				// Exclude vCenters (not already in use) that don't have enough pools
+				excludedVCenters = make(map[string]bool)
+				for _, p := range availablePools {
+					srv := p.Spec.Server
+					if srv != "" && !vcentersInUse[srv] {
+						if fittingPoolsPerVCenter[srv] < minPoolsPerVCenter {
+							excludedVCenters[srv] = true
+						}
+					}
+				}
+
+				if len(excludedVCenters) > 0 {
+					log.Printf("Lease %s: excluded %d vCenters with < %d pools (dynamic filtering)",
+						lease.Name, len(excludedVCenters), minPoolsPerVCenter)
 				}
 			} else if lease.Spec.VCenters < requiredPools && len(assignedPools) == 0 {
 				// Special case: if we need more pools than vCenters allowed (VCenters < Pools),
@@ -906,9 +945,63 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		pool, err := utils.GetPoolWithStrategy(lease, availablePools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED, excludedVCenters)
 		if err != nil {
 			log.Printf("GetPoolWithStrategy error for lease %s: %v", lease.Name, err)
-			// If we already have some pools assigned, mark as partial
-			if len(assignedPools) > 0 {
-				log.Printf("lease %s needs %d pools but only %d available", lease.Name, requiredPools, len(assignedPools))
+
+			// If we already have some pools assigned but can't get more due to vCenter filtering constraints,
+			// we should release what we have and go back to PENDING to try again later with different pools
+			if len(assignedPools) > 0 && lease.Spec.VCenters > 0 {
+				vcentersInUse := utils.GetVCentersInUse(assignedPools)
+
+				// Check if we're stuck because of vCenter constraints:
+				// 1. Cap reached: using all allowed vCenters
+				// 2. Dynamic filtering: excluded remaining vCenters due to insufficient pool count
+				capReached := len(vcentersInUse) >= lease.Spec.VCenters
+				dynamicFilteringApplied := len(excludedVCenters) > 0 && !capReached
+
+				if capReached || dynamicFilteringApplied {
+					reason := "vCenter cap"
+					if dynamicFilteringApplied {
+						reason = "dynamic vCenter filtering"
+					}
+					log.Printf("Lease %s: stuck at PARTIAL due to %s - releasing %d assigned pools to retry",
+						lease.Name, reason, len(assignedPools))
+
+					// Remove all pool AND network owner references to release them
+					// Networks are tied to pools, so if we're releasing pools, we should also release their networks
+					// to avoid resource leaks (networks staying locked to a lease that no longer owns the pools)
+					newOwnerRefs := []metav1.OwnerReference{}
+					for _, ref := range lease.OwnerReferences {
+						if ref.Kind != "Pool" && ref.Kind != "Network" {
+							newOwnerRefs = append(newOwnerRefs, ref)
+						}
+					}
+					lease.OwnerReferences = newOwnerRefs
+
+					// First update the lease metadata (OwnerReferences)
+					if err := l.Client.Update(ctx, lease); err != nil {
+						log.Printf("Failed to update lease metadata (release pools): %v", err)
+						return ctrl.Result{}, err
+					}
+
+					// Then update the status (conditions)
+					conditions.Set(lease, conditions.FalseConditionWithReason(
+						v1.LeaseConditionTypeFulfilled,
+						v1.ReasonLeaseNoPool,
+						v1.ConditionSeverityWarning,
+						fmt.Sprintf("Released %d pools due to %s constraint, retrying", len(assignedPools), reason),
+					))
+
+					if err := l.Client.Status().Update(ctx, lease); err != nil {
+						log.Printf("Failed to update lease status (set PENDING): %v", err)
+						return ctrl.Result{}, err
+					}
+
+					updateLeaseMetrics()
+					log.Printf("lease %s released pools and is PENDING - requeuing in %v", lease.Name, LEASE_PENDING_RETRY_INTERVAL)
+					return ctrl.Result{RequeueAfter: LEASE_PENDING_RETRY_INTERVAL}, nil
+				}
+
+				// Otherwise just mark as partial (not vCenter filtering related)
+				log.Printf("lease %s needs %d pools but only %d available (insufficient pool resources, not vCenter filtering)", lease.Name, requiredPools, len(assignedPools))
 				break
 			}
 
