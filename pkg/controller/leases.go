@@ -440,6 +440,37 @@ func (l *LeaseReconciler) getCommonNetworksForLease(lease *v1.Lease) ([]*v1.Netw
 	return nil, fmt.Errorf("no common network found for %s", lease.Name)
 }
 
+// failLeaseIfUnsatisfiable checks whether lease can ever be fulfilled given the full pool
+// inventory. If not, it mutates lease (OwnerReferences + Status) into a terminal Failed
+// state and returns true; the caller is responsible for persisting lease via the client.
+func failLeaseIfUnsatisfiable(lease *v1.Lease, allPools []*v1.Pool) bool {
+	ok, reason := utils.IsLeaseSatisfiable(lease, allPools)
+	if ok {
+		return false
+	}
+
+	log.Printf("lease %s is not satisfiable: %s", lease.Name, reason)
+
+	newOwnerRefs := []metav1.OwnerReference{}
+	for _, ref := range lease.OwnerReferences {
+		if ref.Kind != "Pool" && ref.Kind != "Network" {
+			newOwnerRefs = append(newOwnerRefs, ref)
+		}
+	}
+	lease.OwnerReferences = newOwnerRefs
+	lease.Status.PoolInfo = nil
+	lease.Status.EnvVarsMap = nil
+	lease.Status.Topology.Networks = nil
+	lease.Status.Phase = v1.PHASE_FAILED
+
+	conditions.Set(lease, conditions.FalseConditionWithReason(
+		v1.LeaseConditionTypeFulfilled, v1.ReasonLeaseUnschedulable, v1.ConditionSeverityError, reason))
+	conditions.Set(lease, conditions.FalseCondition(v1.LeaseConditionTypePending))
+	conditions.Set(lease, conditions.FalseCondition(v1.LeaseConditionTypePartial))
+	conditions.Set(lease, conditions.FalseCondition(v1.LeaseConditionTypeDelayed))
+	return true
+}
+
 // shouldLeaseBeDelayed is used to determine if current lease should be delayed.
 func shouldLeaseBeDelayed(lease *v1.Lease) bool {
 	// Iterate through all leases.  Ignore fulfilled.  If we see Partial, block if needing same pool.  If Pending, we
@@ -469,6 +500,8 @@ func shouldLeaseBeDelayed(lease *v1.Lease) bool {
 
 			switch curLease.Status.Phase {
 			case v1.PHASE_FULFILLED:
+				continue
+			case v1.PHASE_FAILED:
 				continue
 			case v1.PHASE_PARTIAL:
 				// We want partial to prevent others wanting same pool.
@@ -657,12 +690,30 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	leases[leaseKey] = lease
 
-	if lease.Status.Phase == v1.PHASE_FULFILLED {
-		log.Print("lease is already fulfilled")
+	if lease.Status.Phase == v1.PHASE_FULFILLED || lease.Status.Phase == v1.PHASE_FAILED {
+		log.Print("lease is already fulfilled or failed")
 		return ctrl.Result{}, nil
 	}
 
 	updatedPools := reconcilePoolStates()
+
+	if failLeaseIfUnsatisfiable(lease, updatedPools) {
+		if err := l.Client.Update(ctx, lease); err != nil {
+			return ctrl.Result{}, fmt.Errorf("error releasing owner refs for unschedulable lease: %w", err)
+		}
+		LeaseTransitionsTotal.With(prometheus.Labels{
+			"namespace":   lease.Namespace,
+			"networkType": string(lease.Spec.NetworkType),
+			"phase":       string(v1.PHASE_FAILED),
+		}).Inc()
+		if err := l.Client.Status().Update(ctx, lease); err != nil {
+			return ctrl.Result{}, fmt.Errorf("error updating lease status to Failed: %w", err)
+		}
+		l.triggerPoolUpdates(ctx)
+		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
+		updateLeaseMetrics()
+		return ctrl.Result{}, nil
+	}
 
 	// TODO: How often are we hitting this and can we remove this and just use the one above?
 	if len(lease.Status.Phase) == 0 {

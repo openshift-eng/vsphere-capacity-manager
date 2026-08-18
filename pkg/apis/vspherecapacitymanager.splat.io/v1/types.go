@@ -76,7 +76,8 @@ const (
 
 // all the reasons for various updates
 const (
-	ReasonLeaseDelayed string = "LeaseDelayed"
-	ReasonLeasePartial string = "LeasePartial"
-	ReasonLeaseNoPool  string = "NoAvailablePool"
+	ReasonLeaseDelayed       string = "LeaseDelayed"
+	ReasonLeasePartial       string = "LeasePartial"
+	ReasonLeaseNoPool        string = "NoAvailablePool"
+	ReasonLeaseUnschedulable string = "Unschedulable"
 )

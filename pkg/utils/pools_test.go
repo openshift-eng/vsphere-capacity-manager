@@ -1671,3 +1671,179 @@ func TestGetPoolWithStrategyVCenters2Pools3(t *testing.T) {
 
 	t.Logf("Successfully selected pool %s from vCenter %s", pool.Name, pool.Spec.Server)
 }
+
+// testPool builds a minimal pool on the given vcenter server, with optional name/labels/taints.
+func testPool(name, server string) *v1.Pool {
+	return &v1.Pool{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: v1.PoolSpec{
+			FailureDomainSpec: v1.FailureDomainSpec{
+				VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+					Server: server,
+				},
+			},
+		},
+	}
+}
+
+func TestMaxAchievablePools(t *testing.T) {
+	tests := []struct {
+		name     string
+		lease    *v1.Lease
+		pools    []*v1.Pool
+		expected int
+	}{
+		{
+			name: "single vcenter with 3 pools, capped at 1 vcenter",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 4, VCenters: 1},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc1-pool2", "vcenter1.example.com"),
+				testPool("vc1-pool3", "vcenter1.example.com"),
+			},
+			expected: 3,
+		},
+		{
+			name: "unconstrained vcenters sums all matching pools",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 5, VCenters: 0},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+				testPool("vc3-pool1", "vcenter3.example.com"),
+			},
+			expected: 3,
+		},
+		{
+			name: "vcenters cap is the binding constraint, not raw pool count",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 4, VCenters: 2},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc1-pool2", "vcenter1.example.com"),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+				testPool("vc2-pool2", "vcenter2.example.com"),
+				testPool("vc3-pool1", "vcenter3.example.com"),
+				testPool("vc3-pool2", "vcenter3.example.com"),
+			},
+			// best 2 vcenters combined only ever provide 4 pools, even though 6 exist total
+			expected: 4,
+		},
+		{
+			name: "requiredPool naming a nonexistent pool yields zero",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 1, RequiredPool: "does-not-exist"},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+			},
+			expected: 0,
+		},
+		{
+			name: "poolSelector narrows structural match even with ample capacity elsewhere",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{
+					Pools:        2,
+					PoolSelector: map[string]string{"region": "us-west"},
+				},
+			},
+			pools: []*v1.Pool{
+				func() *v1.Pool {
+					p := testPool("vc1-pool1", "vcenter1.example.com")
+					p.Labels = map[string]string{"region": "us-west"}
+					return p
+				}(),
+				testPool("vc1-pool2", "vcenter1.example.com"), // no matching label
+				testPool("vc1-pool3", "vcenter1.example.com"), // no matching label
+			},
+			expected: 1,
+		},
+		{
+			name: "tolerations narrow structural match even with ample capacity elsewhere",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 2},
+			},
+			pools: []*v1.Pool{
+				func() *v1.Pool {
+					p := testPool("vc1-pool1", "vcenter1.example.com")
+					p.Spec.Taints = []v1.Taint{{Key: "dedicated", Value: "gpu", Effect: v1.TaintEffectNoSchedule}}
+					return p
+				}(),
+				testPool("vc1-pool2", "vcenter1.example.com"),
+			},
+			expected: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := MaxAchievablePools(tt.lease, tt.pools)
+			if result != tt.expected {
+				t.Errorf("MaxAchievablePools() = %d, expected %d", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsLeaseSatisfiable(t *testing.T) {
+	tests := []struct {
+		name     string
+		lease    *v1.Lease
+		pools    []*v1.Pool
+		expected bool
+	}{
+		{
+			name: "reported bug repro: 4 pools needed from 1 vcenter that only has 3",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 4, VCenters: 1},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc1-pool2", "vcenter1.example.com"),
+				testPool("vc1-pool3", "vcenter1.example.com"),
+			},
+			expected: false,
+		},
+		{
+			name: "same inventory but requesting only 3 pools is satisfiable",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 3, VCenters: 1},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc1-pool2", "vcenter1.example.com"),
+				testPool("vc1-pool3", "vcenter1.example.com"),
+			},
+			expected: true,
+		},
+		{
+			name: "default pool count of 1 is satisfiable with any matching pool",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ok, reason := IsLeaseSatisfiable(tt.lease, tt.pools)
+			if ok != tt.expected {
+				t.Errorf("IsLeaseSatisfiable() = (%v, %q), expected ok=%v", ok, reason, tt.expected)
+			}
+			if !ok && reason == "" {
+				t.Errorf("IsLeaseSatisfiable() returned false with no reason")
+			}
+			if ok && reason != "" {
+				t.Errorf("IsLeaseSatisfiable() returned true with a non-empty reason %q", reason)
+			}
+		})
+	}
+}
