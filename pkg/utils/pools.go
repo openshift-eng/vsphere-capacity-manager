@@ -105,6 +105,92 @@ func GetVCentersInUse(assignedPools []*v1.Pool) map[string]bool {
 	return vcenters
 }
 
+// poolMatchesStructural reports whether a pool structurally matches a lease's requirements,
+// ignoring transient state such as current resource availability, current ownership, and
+// any vCenter exclusions computed for a particular reconcile pass. It captures only the
+// checks that depend on static configuration (RequiredPool/Exclude, PoolSelector,
+// Tolerations, NoSchedule), which is what determines whether a request could ever be
+// satisfied by this pool, as opposed to whether it can be satisfied right now.
+func poolMatchesStructural(lease *v1.Lease, pool *v1.Pool) bool {
+	if pool.Spec.NoSchedule {
+		return false
+	}
+	nameMatch := len(lease.Spec.RequiredPool) > 0 && lease.Spec.RequiredPool == pool.ObjectMeta.Name
+	if !nameMatch && pool.Spec.Exclude {
+		return false
+	}
+	if len(lease.Spec.RequiredPool) > 0 && !nameMatch {
+		return false
+	}
+	if !PoolMatchesSelector(lease, pool) {
+		return false
+	}
+	if !LeaseToleratesPoolTaints(lease, pool) {
+		return false
+	}
+	return true
+}
+
+// MaxAchievablePools returns the maximum number of pools a lease could ever be assigned,
+// given the full known pool inventory and the lease's structural constraints (RequiredPool,
+// PoolSelector, Tolerations, NoSchedule/Exclude) and its VCenters cap. It deliberately
+// ignores current resource availability and existing ownership, since those are transient:
+// this answers "can this request ever be satisfied," not "can it be satisfied right now."
+func MaxAchievablePools(lease *v1.Lease, allPools []*v1.Pool) int {
+	poolsPerVCenter := make(map[string]int)
+	for _, pool := range allPools {
+		if !poolMatchesStructural(lease, pool) {
+			continue
+		}
+		poolsPerVCenter[pool.Spec.Server]++
+	}
+
+	if lease.Spec.VCenters <= 0 {
+		total := 0
+		for _, count := range poolsPerVCenter {
+			total += count
+		}
+		return total
+	}
+
+	counts := make([]int, 0, len(poolsPerVCenter))
+	for _, count := range poolsPerVCenter {
+		counts = append(counts, count)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(counts)))
+
+	n := lease.Spec.VCenters
+	if n > len(counts) {
+		n = len(counts)
+	}
+	total := 0
+	for i := 0; i < n; i++ {
+		total += counts[i]
+	}
+	return total
+}
+
+// IsLeaseSatisfiable reports whether a lease's request could ever be fulfilled given the
+// full known pool inventory. It returns false with an explanatory reason when the lease's
+// Pools/VCenters requirements structurally exceed what the known inventory can ever provide,
+// regardless of current utilization by other leases.
+func IsLeaseSatisfiable(lease *v1.Lease, allPools []*v1.Pool) (bool, string) {
+	requiredPools := lease.Spec.Pools
+	if requiredPools == 0 {
+		requiredPools = 1
+	}
+
+	maxAchievable := MaxAchievablePools(lease, allPools)
+	if maxAchievable >= requiredPools {
+		return true, ""
+	}
+
+	return false, fmt.Sprintf(
+		"lease requires %d pool(s) (vcenters cap %d) but at most %d are structurally achievable given the known pool inventory",
+		requiredPools, lease.Spec.VCenters, maxAchievable,
+	)
+}
+
 // GetFittingPools returns a list of pools that have enough resources to satisfy the resource requirements and a list of
 // PoolFittingInfo specifying why pool is not a match.
 // The list is sorted by the sum of the resource usage of the pool. The pool with the least resource usage is first.
