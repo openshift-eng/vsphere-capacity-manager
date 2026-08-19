@@ -698,9 +698,14 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	updatedPools := reconcilePoolStates()
 
 	if failLeaseIfUnsatisfiable(lease, updatedPools) {
+		leaseStatus := lease.Status.DeepCopy()
 		if err := l.Client.Update(ctx, lease); err != nil {
 			return ctrl.Result{}, fmt.Errorf("error releasing owner refs for unschedulable lease: %w", err)
 		}
+		// l.Client.Update overwrites lease in place with the API server's response, which
+		// carries the pre-update (non-Failed) status since status is a subresource. Restore
+		// the Failed status computed by failLeaseIfUnsatisfiable before persisting it below.
+		leaseStatus.DeepCopyInto(&lease.Status)
 		LeaseTransitionsTotal.With(prometheus.Labels{
 			"namespace":   lease.Namespace,
 			"networkType": string(lease.Spec.NetworkType),
