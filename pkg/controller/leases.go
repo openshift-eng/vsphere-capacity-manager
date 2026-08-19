@@ -284,7 +284,7 @@ func (l *LeaseReconciler) triggerLeaseUpdates(ctx context.Context, networkType v
 		}
 
 		// We only want to force an update for leases that are Pending or Partial
-		if lease.Status.Phase == v1.PHASE_FULFILLED {
+		if lease.Status.Phase == v1.PHASE_FULFILLED || lease.Status.Phase == v1.PHASE_FAILED {
 			continue
 		}
 
