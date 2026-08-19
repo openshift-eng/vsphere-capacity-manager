@@ -57,6 +57,11 @@ func TestFailLeaseIfUnsatisfiable(t *testing.T) {
 		if lease.Status.PoolInfo != nil {
 			t.Errorf("expected PoolInfo to be cleared, got %v", lease.Status.PoolInfo)
 		}
+		if len(lease.Status.Topology.Networks) == 0 {
+			t.Errorf("expected Topology.Networks to remain non-empty (status.topology.networks is a "+
+				"required, minItems:1 field on the CRD; an empty value makes the status update that "+
+				"persists Failed get rejected by the API server), got %v", lease.Status.Topology.Networks)
+		}
 		if len(lease.OwnerReferences) != 1 || lease.OwnerReferences[0].Kind != "SomeOtherKind" {
 			t.Errorf("expected Pool/Network owner refs to be stripped, got %v", lease.OwnerReferences)
 		}

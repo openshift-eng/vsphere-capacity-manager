@@ -1318,12 +1318,15 @@ var _ = Describe("Lease management", func() {
 			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
 		})
 
-		By("waiting for lease to be pending with no pools available", func() {
+		By("waiting for lease to be rejected as structurally unsatisfiable", func() {
+			// The selector matches none of the known pools, so no pool could ever satisfy this
+			// lease regardless of how long we wait - it should fail fast rather than stay
+			// Pending forever.
 			Eventually(func() bool {
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
-				return lease.Status.Phase == v1.PHASE_PENDING
+				return lease.Status.Phase == v1.PHASE_FAILED
 			}).Should(BeTrue())
-			VerifyCondition(lease, v1.LeaseConditionTypeFulfilled, v1.ConditionFalse)
+			VerifyConditionReason(lease, v1.LeaseConditionTypeFulfilled, v1.ConditionFalse, v1.ReasonLeaseUnschedulable)
 		})
 
 		By("deleting the lease", func() {
