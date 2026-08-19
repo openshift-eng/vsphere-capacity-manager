@@ -460,7 +460,9 @@ func failLeaseIfUnsatisfiable(lease *v1.Lease, allPools []*v1.Pool) bool {
 	lease.OwnerReferences = newOwnerRefs
 	lease.Status.PoolInfo = nil
 	lease.Status.EnvVarsMap = nil
-	lease.Status.Topology.Networks = nil
+	// status.topology.networks is a required, non-empty field on the CRD; it can't be
+	// cleared outright, so reset it to the same placeholder used before any pool is assigned.
+	lease.Status.Topology.Networks = []string{"/pending/network/pending"}
 	lease.Status.Phase = v1.PHASE_FAILED
 
 	conditions.Set(lease, conditions.FalseConditionWithReason(
@@ -1038,7 +1040,13 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 						return ctrl.Result{}, err
 					}
 
-					// Then update the status (conditions)
+					// Then update the status (conditions). Clear PoolInfo/EnvVarsMap since they still
+					// reference the pools/networks we just released ownership of. status.topology.networks
+					// is a required, non-empty field on the CRD, so reset it to the same placeholder used
+					// before any pool is assigned rather than clearing it outright.
+					lease.Status.PoolInfo = nil
+					lease.Status.EnvVarsMap = nil
+					lease.Status.Topology.Networks = []string{"/pending/network/pending"}
 					conditions.Set(lease, conditions.FalseConditionWithReason(
 						v1.LeaseConditionTypeFulfilled,
 						v1.ReasonLeaseNoPool,
