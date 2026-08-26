@@ -667,14 +667,26 @@ def jobs():
         print("| " + job["name"].ljust(nameMaxLen) + " | " + job["type"].ljust(jobTypeMaxLen) + " | " + str(job["count"]).ljust(countLen) + " |")
     print(header)
 
-def printLeases():
-    nameMaxLen = 0
-    leases = getLeases()
+# Display style for each lease phase. Unknown/missing phases fall back to "white".
+PHASE_STYLES = {
+    "Fulfilled": "green",
+    "Partial": "yellow",
+    "Pending": "blue",
+    "Failed": "red bold",
+}
 
-    # Columns for per-lease table
-    leaseIdMaxLen = len("Boskos Lease ID")
-    jobTypeMaxLen = len("Job Type")
-    # Use dict to de-duplicate by lease id
+def getPhaseColor(phase):
+    """Return the Rich style associated with a lease phase."""
+    return PHASE_STYLES.get(phase, "white")
+
+def getPhaseText(phase):
+    """Return phase formatted with color for Rich output."""
+    if not RICH_AVAILABLE:
+        return phase
+    return Text(phase, style=getPhaseColor(phase))
+
+def buildLeasesById(leases):
+    """De-duplicate leases by boskos-lease-id and collect the fields shown in the leases table."""
     leasesById = {}
 
     for lease in leases:
@@ -683,31 +695,137 @@ def printLeases():
         annotations = metadata.get("annotations", {}) or {}
 
         jobName = labels.get("job-name", "unknown")
-
-        # Track max name length
-        nameLen = len(jobName)
-        if nameLen > nameMaxLen:
-            nameMaxLen = nameLen
-
-        # Build per-lease info (dedup by boskos-lease-id)
         leaseId = labels.get("boskos-lease-id") or metadata.get("name", "unknown")
         jobType = annotations.get("prow-job-type", "unknown")
-        if leaseId not in leasesById:
-            leasesById[leaseId] = {"leaseId": leaseId, "jobName": jobName, "jobType": jobType}
-            if len(leaseId) > leaseIdMaxLen:
-                leaseIdMaxLen = len(leaseId)
-            if len(jobType) > jobTypeMaxLen:
-                jobTypeMaxLen = len(jobType)
+        phase = lease.get("status", {}).get("phase") or "Unknown"
 
-    # Detailed table organized by Lease ID including Job Type
-    header = "+".ljust(leaseIdMaxLen+3,"-") + "+".ljust(nameMaxLen+3,"-") + "+".ljust(jobTypeMaxLen+3,"-") + "+"
+        if leaseId not in leasesById:
+            leasesById[leaseId] = {"leaseId": leaseId, "jobName": jobName, "jobType": jobType, "phase": phase}
+
+    return leasesById
+
+def getPhaseCounts(leasesById):
+    """Count deduplicated leases per phase."""
+    counts = {}
+    for entry in leasesById.values():
+        counts[entry["phase"]] = counts.get(entry["phase"], 0) + 1
+    return counts
+
+KNOWN_PHASES = ("Fulfilled", "Partial", "Pending", "Failed")
+
+def getOtherPhaseCount(phaseCounts):
+    """Count leases whose phase is not one of the known/canonical phases."""
+    return sum(count for phase, count in phaseCounts.items() if phase not in KNOWN_PHASES)
+
+# Canonical Prow job types (see prow-job-type annotation), lowercase as Prow emits them.
+KNOWN_JOB_TYPES = ("presubmit", "periodic", "postsubmit", "batch")
+
+def getJobTypeCounts(leasesById):
+    """Count deduplicated leases per job type."""
+    counts = {}
+    for entry in leasesById.values():
+        counts[entry["jobType"]] = counts.get(entry["jobType"], 0) + 1
+    return counts
+
+def getOtherJobTypeCount(jobTypeCounts):
+    """Count leases whose job type is not one of the known Prow job types."""
+    return sum(count for jobType, count in jobTypeCounts.items() if jobType not in KNOWN_JOB_TYPES)
+
+def printLeasesRich():
+    """Print leases using Rich library with colored, formatted output."""
+    console = Console()
+    leasesById = buildLeasesById(getLeases())
+    phaseCounts = getPhaseCounts(leasesById)
+    jobTypeCounts = getJobTypeCounts(leasesById)
+
+    console.print()
+
+    table = Table(
+        title="vSphere Capacity Manager - Leases",
+        show_lines=True,
+        title_style="bold cyan"
+    )
+    table.add_column("Boskos Lease ID", style="cyan bold", no_wrap=True)
+    table.add_column("Job Name", no_wrap=True)
+    table.add_column("Job Type", no_wrap=True)
+    table.add_column("Phase", justify="center", no_wrap=True)
+
+    for entry in leasesById.values():
+        table.add_row(
+            entry["leaseId"],
+            entry["jobName"],
+            entry["jobType"],
+            getPhaseText(entry["phase"])
+        )
+
+    console.print(table)
+    console.print()
+
+    summary_text = (
+        f"[bold]Total Leases:[/] {len(leasesById)}  "
+        f"[green]Fulfilled:[/] {phaseCounts.get('Fulfilled', 0)}  "
+        f"[yellow]Partial:[/] {phaseCounts.get('Partial', 0)}  "
+        f"[blue]Pending:[/] {phaseCounts.get('Pending', 0)}  "
+        f"[red]Failed:[/] {phaseCounts.get('Failed', 0)}  "
+        f"[white]Unknown:[/] {getOtherPhaseCount(phaseCounts)}"
+    )
+    console.print(summary_text)
+
+    job_type_summary_text = (
+        f"[bold]Presubmit:[/] {jobTypeCounts.get('presubmit', 0)}  "
+        f"[bold]Periodic:[/] {jobTypeCounts.get('periodic', 0)}  "
+        f"[bold]Postsubmit:[/] {jobTypeCounts.get('postsubmit', 0)}  "
+        f"[bold]Batch:[/] {jobTypeCounts.get('batch', 0)}  "
+        f"[white]Other:[/] {getOtherJobTypeCount(jobTypeCounts)}"
+    )
+    console.print(job_type_summary_text)
+    console.print()
+
+def printLeasesPlain():
+    """Print leases as a plain-text table."""
+    leasesById = buildLeasesById(getLeases())
+    phaseCounts = getPhaseCounts(leasesById)
+    jobTypeCounts = getJobTypeCounts(leasesById)
+
+    leaseIdMaxLen = len("Boskos Lease ID")
+    nameMaxLen = len("Job Name")
+    jobTypeMaxLen = len("Job Type")
+    phaseMaxLen = len("Phase")
+
+    for entry in leasesById.values():
+        leaseIdMaxLen = max(leaseIdMaxLen, len(entry["leaseId"]))
+        nameMaxLen = max(nameMaxLen, len(entry["jobName"]))
+        jobTypeMaxLen = max(jobTypeMaxLen, len(entry["jobType"]))
+        phaseMaxLen = max(phaseMaxLen, len(entry["phase"]))
+
+    # Detailed table organized by Lease ID including Job Type and Phase
+    header = "+".ljust(leaseIdMaxLen+3,"-") + "+".ljust(nameMaxLen+3,"-") + "+".ljust(jobTypeMaxLen+3,"-") + "+".ljust(phaseMaxLen+3,"-") + "+"
     print(header)
-    print("| Boskos Lease ID".ljust(leaseIdMaxLen+3) + "| Job Name".ljust(nameMaxLen+3) + "| Job Type".ljust(jobTypeMaxLen+3) + "|")
+    print("| Boskos Lease ID".ljust(leaseIdMaxLen+3) + "| Job Name".ljust(nameMaxLen+3) + "| Job Type".ljust(jobTypeMaxLen+3) + "| Phase".ljust(phaseMaxLen+3) + "|")
     print(header)
-    for leaseId in leasesById:
-        entry = leasesById[leaseId]
-        print("| " + entry["leaseId"].ljust(leaseIdMaxLen) + " | " + entry["jobName"].ljust(nameMaxLen) + " | " + entry["jobType"].ljust(jobTypeMaxLen) + " |")
+    for entry in leasesById.values():
+        print("| " + entry["leaseId"].ljust(leaseIdMaxLen) + " | " + entry["jobName"].ljust(nameMaxLen) + " | " + entry["jobType"].ljust(jobTypeMaxLen) + " | " + entry["phase"].ljust(phaseMaxLen) + " |")
     print(header)
+
+    print("\nTotal Leases: " + str(len(leasesById)) +
+          ", Fulfilled: " + str(phaseCounts.get("Fulfilled", 0)) +
+          ", Partial: " + str(phaseCounts.get("Partial", 0)) +
+          ", Pending: " + str(phaseCounts.get("Pending", 0)) +
+          ", Failed: " + str(phaseCounts.get("Failed", 0)) +
+          ", Unknown: " + str(getOtherPhaseCount(phaseCounts)))
+
+    print("Job Types - Presubmit: " + str(jobTypeCounts.get("presubmit", 0)) +
+          ", Periodic: " + str(jobTypeCounts.get("periodic", 0)) +
+          ", Postsubmit: " + str(jobTypeCounts.get("postsubmit", 0)) +
+          ", Batch: " + str(jobTypeCounts.get("batch", 0)) +
+          ", Other: " + str(getOtherJobTypeCount(jobTypeCounts)))
+
+def printLeases(outputFormat="plain"):
+    """Print leases with support for multiple output formats."""
+    if outputFormat == "rich" and RICH_AVAILABLE:
+        printLeasesRich()
+    else:
+        printLeasesPlain()
 
 
 def main():
@@ -766,6 +884,7 @@ def main():
 
     # Leases command
     parser_leases = subparsers.add_parser("leases", help="Get list of leases")
+    parser_leases.add_argument("--format", choices=["plain", "rich"], default="rich" if RICH_AVAILABLE else "plain", help="Output format (default: rich if available, otherwise plain)")
     
     args = parser.parse_args()
     
@@ -797,7 +916,7 @@ def main():
     elif args.command == "jobs":
         jobs()
     elif args.command == "leases":
-        printLeases()
+        printLeases(getattr(args, 'format', 'rich' if RICH_AVAILABLE else 'plain'))
     else:
         parser.print_help()
 
