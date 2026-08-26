@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -104,6 +105,71 @@ func TestFailLeaseIfUnsatisfiable(t *testing.T) {
 			t.Errorf("expected Phase to remain unchanged, got %s", lease.Status.Phase)
 		}
 	})
+
+	t.Run("lease requiring a pool that does not exist is failed", func(t *testing.T) {
+		lease := &v1.Lease{
+			ObjectMeta: metav1.ObjectMeta{Name: "ghost-pool-lease"},
+			Spec:       v1.LeaseSpec{Pools: 1, RequiredPool: "ghost-pool"},
+			Status:     v1.LeaseStatus{Phase: v1.PHASE_PENDING},
+		}
+
+		pools := []*v1.Pool{
+			testPoolForSatisfiability("vc1-pool1", "vcenter1.example.com"),
+		}
+
+		if !failLeaseIfUnsatisfiable(lease, pools) {
+			t.Fatalf("expected failLeaseIfUnsatisfiable to return true for a nonexistent required pool")
+		}
+		if lease.Status.Phase != v1.PHASE_FAILED {
+			t.Errorf("expected Phase to be Failed, got %s", lease.Status.Phase)
+		}
+
+		fulfilled := conditionOfType(lease, v1.LeaseConditionTypeFulfilled)
+		if fulfilled == nil {
+			t.Fatalf("expected a Fulfilled condition to be set")
+		}
+		if !strings.Contains(fulfilled.Message, `required pool "ghost-pool" does not exist`) {
+			t.Errorf("expected condition message to explain the missing pool, got %q", fulfilled.Message)
+		}
+	})
+
+	t.Run("lease requiring a disabled pool is failed", func(t *testing.T) {
+		disabledPool := testPoolForSatisfiability("disabled-pool", "vcenter1.example.com")
+		disabledPool.Spec.NoSchedule = true
+
+		lease := &v1.Lease{
+			ObjectMeta: metav1.ObjectMeta{Name: "disabled-pool-lease"},
+			Spec:       v1.LeaseSpec{Pools: 1, RequiredPool: "disabled-pool"},
+			Status:     v1.LeaseStatus{Phase: v1.PHASE_PENDING},
+		}
+
+		pools := []*v1.Pool{disabledPool}
+
+		if !failLeaseIfUnsatisfiable(lease, pools) {
+			t.Fatalf("expected failLeaseIfUnsatisfiable to return true for a disabled required pool")
+		}
+		if lease.Status.Phase != v1.PHASE_FAILED {
+			t.Errorf("expected Phase to be Failed, got %s", lease.Status.Phase)
+		}
+
+		fulfilled := conditionOfType(lease, v1.LeaseConditionTypeFulfilled)
+		if fulfilled == nil {
+			t.Fatalf("expected a Fulfilled condition to be set")
+		}
+		if !strings.Contains(fulfilled.Message, `required pool "disabled-pool" is disabled`) {
+			t.Errorf("expected condition message to explain the disabled pool, got %q", fulfilled.Message)
+		}
+	})
+}
+
+// conditionOfType returns the lease condition of the given type, or nil if not present.
+func conditionOfType(lease *v1.Lease, condType v1.ConditionType) *v1.Condition {
+	for i := range lease.Status.Conditions {
+		if lease.Status.Conditions[i].Type == condType {
+			return &lease.Status.Conditions[i]
+		}
+	}
+	return nil
 }
 
 func TestShouldLeaseBeDelayed_SkipsFailed(t *testing.T) {

@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"strings"
 	"testing"
 
 	configv1 "github.com/openshift/api/config/v1"
@@ -1791,10 +1792,11 @@ func TestMaxAchievablePools(t *testing.T) {
 
 func TestIsLeaseSatisfiable(t *testing.T) {
 	tests := []struct {
-		name     string
-		lease    *v1.Lease
-		pools    []*v1.Pool
-		expected bool
+		name            string
+		lease           *v1.Lease
+		pools           []*v1.Pool
+		expected        bool
+		reasonSubstring string
 	}{
 		{
 			name: "reported bug repro: 4 pools needed from 1 vcenter that only has 3",
@@ -1830,6 +1832,47 @@ func TestIsLeaseSatisfiable(t *testing.T) {
 			},
 			expected: true,
 		},
+		{
+			name: "requiredPool naming a pool that does not exist fails with a specific reason",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 1, RequiredPool: "ghost-pool"},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+			},
+			expected:        false,
+			reasonSubstring: `required pool "ghost-pool" does not exist`,
+		},
+		{
+			name: "requiredPool naming a disabled pool fails with a specific reason",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 1, RequiredPool: "disabled-pool"},
+			},
+			pools: []*v1.Pool{
+				func() *v1.Pool {
+					p := testPool("disabled-pool", "vcenter1.example.com")
+					p.Spec.NoSchedule = true
+					return p
+				}(),
+			},
+			expected:        false,
+			reasonSubstring: `required pool "disabled-pool" is disabled`,
+		},
+		{
+			name: "requiredPool naming an existing, enabled pool is satisfiable even if other pools are disabled",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 1, RequiredPool: "enabled-pool"},
+			},
+			pools: []*v1.Pool{
+				testPool("enabled-pool", "vcenter1.example.com"),
+				func() *v1.Pool {
+					p := testPool("other-disabled-pool", "vcenter1.example.com")
+					p.Spec.NoSchedule = true
+					return p
+				}(),
+			},
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1843,6 +1886,9 @@ func TestIsLeaseSatisfiable(t *testing.T) {
 			}
 			if ok && reason != "" {
 				t.Errorf("IsLeaseSatisfiable() returned true with a non-empty reason %q", reason)
+			}
+			if tt.reasonSubstring != "" && !strings.Contains(reason, tt.reasonSubstring) {
+				t.Errorf("IsLeaseSatisfiable() reason = %q, expected it to contain %q", reason, tt.reasonSubstring)
 			}
 		})
 	}
