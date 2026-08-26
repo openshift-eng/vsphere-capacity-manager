@@ -717,11 +717,26 @@ def getOtherPhaseCount(phaseCounts):
     """Count leases whose phase is not one of the known/canonical phases."""
     return sum(count for phase, count in phaseCounts.items() if phase not in KNOWN_PHASES)
 
+# Canonical Prow job types (see prow-job-type annotation), lowercase as Prow emits them.
+KNOWN_JOB_TYPES = ("presubmit", "periodic", "postsubmit", "batch")
+
+def getJobTypeCounts(leasesById):
+    """Count deduplicated leases per job type."""
+    counts = {}
+    for entry in leasesById.values():
+        counts[entry["jobType"]] = counts.get(entry["jobType"], 0) + 1
+    return counts
+
+def getOtherJobTypeCount(jobTypeCounts):
+    """Count leases whose job type is not one of the known Prow job types."""
+    return sum(count for jobType, count in jobTypeCounts.items() if jobType not in KNOWN_JOB_TYPES)
+
 def printLeasesRich():
     """Print leases using Rich library with colored, formatted output."""
     console = Console()
     leasesById = buildLeasesById(getLeases())
     phaseCounts = getPhaseCounts(leasesById)
+    jobTypeCounts = getJobTypeCounts(leasesById)
 
     console.print()
 
@@ -755,12 +770,22 @@ def printLeasesRich():
         f"[white]Unknown:[/] {getOtherPhaseCount(phaseCounts)}"
     )
     console.print(summary_text)
+
+    job_type_summary_text = (
+        f"[bold]Presubmit:[/] {jobTypeCounts.get('presubmit', 0)}  "
+        f"[bold]Periodic:[/] {jobTypeCounts.get('periodic', 0)}  "
+        f"[bold]Postsubmit:[/] {jobTypeCounts.get('postsubmit', 0)}  "
+        f"[bold]Batch:[/] {jobTypeCounts.get('batch', 0)}  "
+        f"[white]Other:[/] {getOtherJobTypeCount(jobTypeCounts)}"
+    )
+    console.print(job_type_summary_text)
     console.print()
 
 def printLeasesPlain():
     """Print leases as a plain-text table."""
     leasesById = buildLeasesById(getLeases())
     phaseCounts = getPhaseCounts(leasesById)
+    jobTypeCounts = getJobTypeCounts(leasesById)
 
     leaseIdMaxLen = len("Boskos Lease ID")
     nameMaxLen = len("Job Name")
@@ -788,6 +813,12 @@ def printLeasesPlain():
           ", Pending: " + str(phaseCounts.get("Pending", 0)) +
           ", Failed: " + str(phaseCounts.get("Failed", 0)) +
           ", Unknown: " + str(getOtherPhaseCount(phaseCounts)))
+
+    print("Job Types - Presubmit: " + str(jobTypeCounts.get("presubmit", 0)) +
+          ", Periodic: " + str(jobTypeCounts.get("periodic", 0)) +
+          ", Postsubmit: " + str(jobTypeCounts.get("postsubmit", 0)) +
+          ", Batch: " + str(jobTypeCounts.get("batch", 0)) +
+          ", Other: " + str(getOtherJobTypeCount(jobTypeCounts)))
 
 def printLeases(outputFormat="plain"):
     """Print leases with support for multiple output formats."""
