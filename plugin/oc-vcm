@@ -711,6 +711,12 @@ def getPhaseCounts(leasesById):
         counts[entry["phase"]] = counts.get(entry["phase"], 0) + 1
     return counts
 
+KNOWN_PHASES = ("Fulfilled", "Partial", "Pending", "Failed")
+
+def getOtherPhaseCount(phaseCounts):
+    """Count leases whose phase is not one of the known/canonical phases."""
+    return sum(count for phase, count in phaseCounts.items() if phase not in KNOWN_PHASES)
+
 def printLeasesRich():
     """Print leases using Rich library with colored, formatted output."""
     console = Console()
@@ -745,7 +751,8 @@ def printLeasesRich():
         f"[green]Fulfilled:[/] {phaseCounts.get('Fulfilled', 0)}  "
         f"[yellow]Partial:[/] {phaseCounts.get('Partial', 0)}  "
         f"[blue]Pending:[/] {phaseCounts.get('Pending', 0)}  "
-        f"[red]Failed:[/] {phaseCounts.get('Failed', 0)}"
+        f"[red]Failed:[/] {phaseCounts.get('Failed', 0)}  "
+        f"[white]Unknown:[/] {getOtherPhaseCount(phaseCounts)}"
     )
     console.print(summary_text)
     console.print()
@@ -779,7 +786,8 @@ def printLeasesPlain():
           ", Fulfilled: " + str(phaseCounts.get("Fulfilled", 0)) +
           ", Partial: " + str(phaseCounts.get("Partial", 0)) +
           ", Pending: " + str(phaseCounts.get("Pending", 0)) +
-          ", Failed: " + str(phaseCounts.get("Failed", 0)))
+          ", Failed: " + str(phaseCounts.get("Failed", 0)) +
+          ", Unknown: " + str(getOtherPhaseCount(phaseCounts)))
 
 def printLeases(outputFormat="plain"):
     """Print leases with support for multiple output formats."""
