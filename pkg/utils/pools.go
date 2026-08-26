@@ -185,10 +185,38 @@ func IsLeaseSatisfiable(lease *v1.Lease, allPools []*v1.Pool) (bool, string) {
 		return true, ""
 	}
 
+	if reason, ok := requiredPoolUnsatisfiableReason(lease, allPools); ok {
+		return false, reason
+	}
+
 	return false, fmt.Sprintf(
 		"lease requires %d pool(s) (vcenters cap %d) but at most %d are structurally achievable given the known pool inventory",
 		requiredPools, lease.Spec.VCenters, maxAchievable,
 	)
+}
+
+// requiredPoolUnsatisfiableReason returns a specific, actionable reason when a lease's
+// RequiredPool can never be scheduled — either because no pool with that name exists, or
+// because the named pool is disabled (NoSchedule). It returns ("", false) when RequiredPool
+// isn't set, or when the named pool exists and is schedulable, in which case any
+// unsatisfiability comes from some other structural mismatch (e.g. PoolSelector,
+// Tolerations) and the caller should fall back to its generic reason.
+func requiredPoolUnsatisfiableReason(lease *v1.Lease, allPools []*v1.Pool) (string, bool) {
+	if lease.Spec.RequiredPool == "" {
+		return "", false
+	}
+
+	for _, pool := range allPools {
+		if pool.ObjectMeta.Name != lease.Spec.RequiredPool {
+			continue
+		}
+		if pool.Spec.NoSchedule {
+			return fmt.Sprintf("required pool %q is disabled and cannot be scheduled", lease.Spec.RequiredPool), true
+		}
+		return "", false
+	}
+
+	return fmt.Sprintf("required pool %q does not exist", lease.Spec.RequiredPool), true
 }
 
 // GetFittingPools returns a list of pools that have enough resources to satisfy the resource requirements and a list of
