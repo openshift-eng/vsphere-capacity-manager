@@ -328,6 +328,194 @@ func TestGetCommonNetworksForLease(t *testing.T) {
 	})
 }
 
+// TestResolveCommonNetworksForPool covers the SPLAT-2927 regression: a job requesting
+// multiple vCenters creates one Lease per vCenter, coordinated only via a shared boskos
+// ID. When a sibling lease's pool is in a different vCenter, its Network object can never
+// match by name in the current pool's topology, so the resolver must fall back to matching
+// by PortGroupName to keep every lease in the group on the same stretched network.
+//
+// PortGroupName, not VlanId, is the deciding key: a stretched network is provisioned with
+// the identical port group name at every site it spans (as observed in the real incident,
+// where both correctly-paired leases resolved to the literal path segment
+// "ci-vlan-1148-12" in two different datacenters), whereas VlanId alone is not a reliable
+// cross-site identifier — a single pool can have multiple distinct port groups sharing one
+// VlanId (multi-tenant shards), and unrelated sites can independently reuse the same VLAN
+// tag number for networks that were never bridged together.
+func TestResolveCommonNetworksForPool(t *testing.T) {
+	dc1 := "cidatacenter-1"
+	dc2 := "cidatacenter-2"
+	podA := "podA"
+	podB := "podB"
+
+	// Sibling lease's network: stretched port group "ci-vlan-1148-12", lives in pod A.
+	siblingNetwork := &v1.Network{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "ci-vlan-1148-12-podA",
+			Labels: map[string]string{v1.NetworkTypeLabel: "multi-tenant"},
+		},
+		TypeMeta: metav1.TypeMeta{Kind: "Network"},
+		Spec: v1.NetworkSpec{
+			PortGroupName:  "ci-vlan-1148-12",
+			VlanId:         "1148",
+			DatacenterName: &dc1,
+			PodName:        &podA,
+		},
+	}
+
+	// Target pool (different vCenter/pod) offers three networks:
+	//  - the same stretched port group name, which must be picked;
+	//  - a local shard that coincidentally shares the sibling's VlanId but is a
+	//    different (non-stretched) port group, which must NOT be picked;
+	//  - a network with neither VlanId nor PortGroupName in common, which must NOT be picked.
+	matchingNetwork := &v1.Network{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "ci-vlan-1148-12-podB",
+			Labels: map[string]string{v1.NetworkTypeLabel: "multi-tenant"},
+		},
+		TypeMeta: metav1.TypeMeta{Kind: "Network"},
+		Spec: v1.NetworkSpec{
+			PortGroupName:  "ci-vlan-1148-12",
+			VlanId:         "1148",
+			DatacenterName: &dc2,
+			PodName:        &podB,
+		},
+	}
+	coincidentalVlanNetwork := &v1.Network{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "ci-vlan-1148-3-podB",
+			Labels: map[string]string{v1.NetworkTypeLabel: "multi-tenant"},
+		},
+		TypeMeta: metav1.TypeMeta{Kind: "Network"},
+		Spec: v1.NetworkSpec{
+			PortGroupName:  "ci-vlan-1148-3",
+			VlanId:         "1148",
+			DatacenterName: &dc2,
+			PodName:        &podB,
+		},
+	}
+	mismatchedNetwork := &v1.Network{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "ci-vlan-1284-2-podB",
+			Labels: map[string]string{v1.NetworkTypeLabel: "multi-tenant"},
+		},
+		TypeMeta: metav1.TypeMeta{Kind: "Network"},
+		Spec: v1.NetworkSpec{
+			PortGroupName:  "ci-vlan-1284-2",
+			VlanId:         "1284",
+			DatacenterName: &dc2,
+			PodName:        &podB,
+		},
+	}
+
+	targetPool := &v1.Pool{
+		ObjectMeta: metav1.ObjectMeta{Name: "pool-b"},
+		Spec: v1.PoolSpec{
+			FailureDomainSpec: v1.FailureDomainSpec{
+				VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+					Topology: configv1.VSpherePlatformTopology{
+						Networks: []string{
+							"/cidatacenter-2/network/ci-vlan-1148-12",
+							"/cidatacenter-2/network/ci-vlan-1148-3",
+							"/cidatacenter-2/network/ci-vlan-1284-2",
+						},
+					},
+				},
+			},
+			IBMPoolSpec: v1.IBMPoolSpec{Pod: podB},
+		},
+	}
+
+	cleanupNetworks := setupTestNetworks(map[string]*v1.Network{
+		siblingNetwork.Name:          siblingNetwork,
+		matchingNetwork.Name:         matchingNetwork,
+		coincidentalVlanNetwork.Name: coincidentalVlanNetwork,
+		mismatchedNetwork.Name:       mismatchedNetwork,
+	})
+	defer cleanupNetworks()
+
+	cleanupLeases := setupTestLeases(map[string]*v1.Lease{})
+	defer cleanupLeases()
+
+	reconciler := &LeaseReconciler{}
+	poolNetworksMap := getNetworksForPool(targetPool)
+
+	got := reconciler.resolveCommonNetworksForPool(
+		[]*v1.Network{siblingNetwork}, targetPool, poolNetworksMap, v1.NetworkTypeMultiTenant,
+	)
+
+	if len(got) != 1 || got[0].Name != matchingNetwork.Name {
+		t.Fatalf("expected port-group-matched network %s, got %v", matchingNetwork.Name, got)
+	}
+	for _, n := range got {
+		if n.Name == coincidentalVlanNetwork.Name {
+			t.Errorf("resolveCommonNetworksForPool must not return a network that only shares a VlanId with the sibling")
+		}
+		if n.Name == mismatchedNetwork.Name {
+			t.Errorf("resolveCommonNetworksForPool must not return a network with a different port group than the sibling")
+		}
+	}
+
+	t.Run("empty sibling PortGroupName yields no fallback candidates", func(t *testing.T) {
+		noPortGroupSibling := &v1.Network{
+			ObjectMeta: metav1.ObjectMeta{Name: "ci-no-portgroup-podA-1"},
+			TypeMeta:   metav1.TypeMeta{Kind: "Network"},
+			Spec: v1.NetworkSpec{
+				PortGroupName:  "",
+				VlanId:         "1148",
+				DatacenterName: &dc1,
+				PodName:        &podA,
+			},
+		}
+
+		// Local network in the target pool that also has no PortGroupName set. Without
+		// the empty-PortGroupName guard, both would map to the "" key and spuriously
+		// "match" even though they share no real port group.
+		noPortGroupLocalNetwork := &v1.Network{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "ci-no-portgroup-podB-2",
+				Labels: map[string]string{v1.NetworkTypeLabel: "multi-tenant"},
+			},
+			TypeMeta: metav1.TypeMeta{Kind: "Network"},
+			Spec: v1.NetworkSpec{
+				PortGroupName:  "",
+				VlanId:         "1148",
+				DatacenterName: &dc2,
+				PodName:        &podB,
+			},
+		}
+
+		noPortGroupPool := &v1.Pool{
+			ObjectMeta: metav1.ObjectMeta{Name: "pool-c"},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Topology: configv1.VSpherePlatformTopology{
+							Networks: []string{"/cidatacenter-2/network/"},
+						},
+					},
+				},
+				IBMPoolSpec: v1.IBMPoolSpec{Pod: podB},
+			},
+		}
+
+		cleanupNoPortGroupNetworks := setupTestNetworks(map[string]*v1.Network{
+			noPortGroupSibling.Name:      noPortGroupSibling,
+			noPortGroupLocalNetwork.Name: noPortGroupLocalNetwork,
+		})
+		defer cleanupNoPortGroupNetworks()
+
+		noPortGroupPoolNetworksMap := getNetworksForPool(noPortGroupPool)
+
+		got := reconciler.resolveCommonNetworksForPool(
+			[]*v1.Network{noPortGroupSibling}, noPortGroupPool, noPortGroupPoolNetworksMap, v1.NetworkTypeMultiTenant,
+		)
+
+		if len(got) != 0 {
+			t.Fatalf("expected no fallback candidates for a sibling with an empty PortGroupName, got %v", got)
+		}
+	})
+}
+
 func TestGetNetworkType(t *testing.T) {
 	tests := []struct {
 		name     string
