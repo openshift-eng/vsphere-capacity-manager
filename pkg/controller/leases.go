@@ -440,6 +440,44 @@ func (l *LeaseReconciler) getCommonNetworksForLease(lease *v1.Lease) ([]*v1.Netw
 	return nil, fmt.Errorf("no common network found for %s", lease.Name)
 }
 
+// resolveCommonNetworksForPool filters candidate networks (typically networks
+// already owned by a sibling lease sharing the same boskos ID) down to those
+// usable within currentPool. It first tries an exact match against the pool's
+// own network map. When a sibling lease lives in a different pool (e.g. a
+// different vCenter in a multi-vcenter job), the sibling's exact Network
+// object won't exist here even though the underlying network is stretched
+// across sites under the same port group name, so it falls back to matching
+// by PortGroupName among the pool's own available networks of the requested
+// type. PortGroupName, not VlanId, is the reliable cross-site identifier: a
+// single pool can have multiple distinct port groups sharing one VlanId
+// (multi-tenant shards), and unrelated sites can independently reuse the same
+// VLAN tag number for networks that were never bridged together. This keeps
+// leases that share a boskos ID converging on the same stretched network
+// instead of picking one at random.
+func (l *LeaseReconciler) resolveCommonNetworksForPool(candidates []*v1.Network, currentPool *v1.Pool, poolNetworksMap map[string]*v1.Network, networkType v1.NetworkType) []*v1.Network {
+	var poolFiltered []*v1.Network
+	for _, n := range candidates {
+		if _, exists := poolNetworksMap[n.Name]; exists {
+			poolFiltered = append(poolFiltered, n)
+		}
+	}
+	if len(poolFiltered) == 0 {
+		siblingPortGroups := make(map[string]bool)
+		for _, n := range candidates {
+			if n.Spec.PortGroupName == "" {
+				continue
+			}
+			siblingPortGroups[n.Spec.PortGroupName] = true
+		}
+		for _, localNet := range l.getAvailableNetworks(currentPool, networkType) {
+			if siblingPortGroups[localNet.Spec.PortGroupName] {
+				poolFiltered = append(poolFiltered, localNet)
+			}
+		}
+	}
+	return poolFiltered
+}
+
 // failLeaseIfUnsatisfiable checks whether lease can ever be fulfilled given the full pool
 // inventory. If not, it mutates lease (OwnerReferences + Status) into a terminal Failed
 // state and returns true; the caller is responsible for persisting lease via the client.
@@ -1165,14 +1203,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			var availableNetworks []*v1.Network
 			availableNetworks, err = l.getCommonNetworksForLease(lease)
 			if err == nil {
-				// Filter common networks to only those in the current pool's topology.
-				// Sibling leases may be on different pools whose networks don't exist here.
-				var poolFiltered []*v1.Network
-				for _, n := range availableNetworks {
-					if _, exists := poolNetworksMap[n.Name]; exists {
-						poolFiltered = append(poolFiltered, n)
-					}
-				}
+				poolFiltered := l.resolveCommonNetworksForPool(availableNetworks, currentPool, poolNetworksMap, lease.Spec.NetworkType)
 				if len(poolFiltered) == 0 {
 					log.Printf("common networks not available in pool %s, falling back to pool-local networks", currentPool.Name)
 					err = fmt.Errorf("no common networks in pool %s", currentPool.Name)
