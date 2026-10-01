@@ -415,8 +415,6 @@ func (l *LeaseReconciler) getCommonNetworksForLease(lease *v1.Lease) ([]*v1.Netw
 			continue
 		} else if thisLeaseID != leaseID {
 			continue
-		} else if lease.Status.Phase != v1.PHASE_PENDING {
-			continue
 		}
 
 		var foundNetworks []*v1.Network
@@ -1203,16 +1201,18 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			var availableNetworks []*v1.Network
 			availableNetworks, err = l.getCommonNetworksForLease(lease)
 			if err == nil {
-				poolFiltered := l.resolveCommonNetworksForPool(availableNetworks, currentPool, poolNetworksMap, lease.Spec.NetworkType)
-				if len(poolFiltered) == 0 {
-					log.Printf("common networks not available in pool %s, falling back to pool-local networks", currentPool.Name)
-					err = fmt.Errorf("no common networks in pool %s", currentPool.Name)
-				} else {
-					availableNetworks = poolFiltered
+				// A sibling (same boskos ID) already has a network assigned, so this pool
+				// is constrained to match it. If no network in this pool satisfies that
+				// constraint, we must NOT fall back to picking an unrelated network below —
+				// doing so is exactly how sibling leases end up on mismatched VLANs/port
+				// groups. Leave availableNetworks empty instead; the pool will
+				// be reported as missing networks and retried on the next reconcile.
+				availableNetworks = l.resolveCommonNetworksForPool(availableNetworks, currentPool, poolNetworksMap, lease.Spec.NetworkType)
+				if len(availableNetworks) == 0 {
+					log.Printf("pool %s cannot supply a network matching the sibling lease(s) in this job; will not fall back to an unconstrained network", currentPool.Name)
 				}
-			}
-			if err != nil {
-				log.Printf("error getting common network for lease, will attempt to allocate new networks: %v", err)
+			} else {
+				log.Printf("no sibling network constraint for lease %s, will attempt to allocate new networks: %v", lease.Name, err)
 
 				availableNetworks = l.getAvailableNetworks(currentPool, lease.Spec.NetworkType)
 
