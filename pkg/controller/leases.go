@@ -406,6 +406,14 @@ func (l *LeaseReconciler) getCommonNetworksForLease(lease *v1.Lease) ([]*v1.Netw
 	}
 
 	for _, _lease := range leases {
+		if _lease.Name == lease.Name {
+			// Don't treat the lease's own already-owned networks as a "sibling" to
+			// match against - that's a no-op that starves it of the additional
+			// networks it still needs (e.g. a multi-network lease topping up its
+			// count, or a sibling that hasn't been assigned any network yet).
+			continue
+		}
+
 		if _lease.Spec.VCpus == 0 && _lease.Spec.Memory == 0 {
 			// this is a network-only lease. do not consider it.
 			continue
