@@ -297,6 +297,26 @@ func TestGetCommonNetworksForLease(t *testing.T) {
 		}
 	})
 
+	// Regression: a lease needing multiple networks per pool (or multiple pools in a
+	// multi-vcenter job) moves to PHASE_PARTIAL as soon as it has *some* but not all of
+	// its networks assigned, and is reconciled again to pick up the rest. The sibling
+	// lookup must still find the already-assigned sibling network in that case -
+	// previously it unconditionally bailed out once the target lease left PHASE_PENDING,
+	// which forced the caller to fall back to an unrelated, unconstrained network and
+	// produced mismatched VLANs/port groups across sibling leases (SPLAT-2927).
+	t.Run("still finds sibling networks once target lease is Partial", func(t *testing.T) {
+		partialLease := targetLease.DeepCopy()
+		partialLease.Status.Phase = v1.PHASE_PARTIAL
+
+		got, err := reconciler.getCommonNetworksForLease(partialLease)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 || got[0].Name != netPoolA.Name {
+			t.Errorf("expected sibling's network %s, got %v", netPoolA.Name, got)
+		}
+	})
+
 	t.Run("sibling network not in target pool topology", func(t *testing.T) {
 		poolNetworksMap := getNetworksForPool(poolB)
 		if _, exists := poolNetworksMap[netPoolA.Name]; exists {
