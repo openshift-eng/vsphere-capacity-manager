@@ -46,6 +46,8 @@ type Taint struct {
 // +kubebuilder:printcolumn:name="vCPUs",type=string,JSONPath=`.status.vcpus-available`
 // +kubebuilder:printcolumn:name="Memory(GB)",type=string,JSONPath=`.status.memory-available`
 // +kubebuilder:printcolumn:name="Networks",type=string,JSONPath=`.status.network-available`
+// +kubebuilder:printcolumn:name="ST-Net",type=string,JSONPath=`.status.single-tenant-networks-available`
+// +kubebuilder:printcolumn:name="MT-Net",type=string,JSONPath=`.status.multi-tenant-networks-available`
 // +kubebuilder:printcolumn:name="Disabled",type=string,JSONPath=`.spec.noSchedule`
 // +kubebuilder:printcolumn:name="Excluded",type=string,JSONPath=`.spec.exclude`
 type Pool struct {
@@ -105,6 +107,18 @@ type PoolStatus struct {
 	// network-available is the number of networks available in the pool
 	// +optional
 	NetworkAvailable int `json:"network-available"`
+	// single-tenant-networks-total is the total number of single-tenant networks assigned to the pool
+	// +optional
+	SingleTenantNetworksTotal int `json:"single-tenant-networks-total"`
+	// single-tenant-networks-available is the number of single-tenant networks available in the pool
+	// +optional
+	SingleTenantNetworksAvailable int `json:"single-tenant-networks-available"`
+	// multi-tenant-networks-total is the total number of multi-tenant networks assigned to the pool
+	// +optional
+	MultiTenantNetworksTotal int `json:"multi-tenant-networks-total"`
+	// multi-tenant-networks-available is the number of multi-tenant networks available in the pool
+	// +optional
+	MultiTenantNetworksAvailable int `json:"multi-tenant-networks-available"`
 	// lease-count is the number of leases assigned to the pool
 	LeaseCount int `json:"lease-count"`
 

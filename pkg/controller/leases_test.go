@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"sort"
 	"testing"
 
@@ -536,6 +537,82 @@ func TestResolveCommonNetworksForPool(t *testing.T) {
 	})
 }
 
+// TestCommonPortGroupNames reproduces the vsphere-elastic-69 incident: three pools in one
+// IBM pod share port group "ci-vlan-1284-3", but a fourth pool (a different site that
+// happens to be tagged with the same IBMPoolSpec.Pod) never has that port group - only
+// "ci-vlan-1108", which all four pools share. The first pool's network pick must be
+// restricted to the latter, or the fourth pool can never be assigned a matching network.
+func TestCommonPortGroupNames(t *testing.T) {
+	pod := "dal10.pod03"
+
+	mkNetwork := func(name, dc, portGroup, vlan string) *v1.Network {
+		dcCopy := dc
+		return &v1.Network{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   name,
+				Labels: map[string]string{v1.NetworkTypeLabel: "multi-tenant"},
+			},
+			TypeMeta: metav1.TypeMeta{Kind: "Network"},
+			Spec: v1.NetworkSpec{
+				PortGroupName:  portGroup,
+				VlanId:         vlan,
+				DatacenterName: &dcCopy,
+				PodName:        &pod,
+			},
+		}
+	}
+
+	mkPool := func(name, dcPath string, portGroups []string) *v1.Pool {
+		netPaths := make([]string, len(portGroups))
+		for i, pg := range portGroups {
+			netPaths[i] = fmt.Sprintf("/%s/network/%s", dcPath, pg)
+		}
+		return &v1.Pool{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Topology: configv1.VSpherePlatformTopology{Networks: netPaths},
+					},
+				},
+				IBMPoolSpec: v1.IBMPoolSpec{Pod: pod},
+			},
+		}
+	}
+
+	pool1 := mkPool("pool1", "cidatacenter", []string{"ci-vlan-1284-3", "ci-vlan-1108"})
+	pool2 := mkPool("pool2", "cidatacenter-1", []string{"ci-vlan-1284-3", "ci-vlan-1108"})
+	pool3 := mkPool("pool3", "cidatacenter-2", []string{"ci-vlan-1284-3", "ci-vlan-1108"})
+	pool4 := mkPool("pool4", "wldn-120-DC", []string{"ci-vlan-1108"})
+
+	cleanupNetworks := setupTestNetworks(map[string]*v1.Network{
+		"pool1/ci-vlan-1284-3": mkNetwork("pool1/ci-vlan-1284-3", "cidatacenter", "ci-vlan-1284-3", "1284"),
+		"pool1/ci-vlan-1108":   mkNetwork("pool1/ci-vlan-1108", "cidatacenter", "ci-vlan-1108", "1108"),
+		"pool2/ci-vlan-1284-3": mkNetwork("pool2/ci-vlan-1284-3", "cidatacenter-1", "ci-vlan-1284-3", "1284"),
+		"pool2/ci-vlan-1108":   mkNetwork("pool2/ci-vlan-1108", "cidatacenter-1", "ci-vlan-1108", "1108"),
+		"pool3/ci-vlan-1284-3": mkNetwork("pool3/ci-vlan-1284-3", "cidatacenter-2", "ci-vlan-1284-3", "1284"),
+		"pool3/ci-vlan-1108":   mkNetwork("pool3/ci-vlan-1108", "cidatacenter-2", "ci-vlan-1108", "1108"),
+		"pool4/ci-vlan-1108":   mkNetwork("pool4/ci-vlan-1108", "wldn-120-DC", "ci-vlan-1108", "1108"),
+	})
+	defer cleanupNetworks()
+
+	cleanupLeases := setupTestLeases(map[string]*v1.Lease{})
+	defer cleanupLeases()
+
+	reconciler := &LeaseReconciler{}
+	got := reconciler.commonPortGroupNames([]*v1.Pool{pool1, pool2, pool3, pool4}, v1.NetworkTypeMultiTenant)
+
+	if got["ci-vlan-1284-3"] {
+		t.Errorf("ci-vlan-1284-3 is not available in pool4 and must not be reported as common")
+	}
+	if !got["ci-vlan-1108"] {
+		t.Errorf("ci-vlan-1108 is available in all 4 pools and must be reported as common")
+	}
+	if len(got) != 1 {
+		t.Errorf("expected exactly 1 common port group, got %v", got)
+	}
+}
+
 func TestGetNetworkType(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -719,6 +796,144 @@ func TestUpdateNetworkTypeMetrics(t *testing.T) {
 	mtFree := testutil.ToFloat64(NetworkLeaseCount.WithLabelValues("default", "net-mt-1", "multi-tenant", "pool1"))
 	if mtFree != 0 {
 		t.Errorf("expected net-mt-1 lease count = 0, got %v", mtFree)
+	}
+}
+
+func TestReconcilePoolStatesNetworkTypeSplit(t *testing.T) {
+	dc := "dc1"
+	pod := "pod1"
+	server := "vcenter1.example.com"
+
+	oldPools := pools
+	oldNetworks := networks
+	oldLeases := leases
+	defer func() {
+		pools = oldPools
+		networks = oldNetworks
+		leases = oldLeases
+	}()
+
+	networks = map[string]*v1.Network{
+		"default/net-st-1": {
+			ObjectMeta: metav1.ObjectMeta{Name: "net-st-1", Namespace: "default"},
+			Spec: v1.NetworkSpec{
+				PortGroupName:  "pg-100",
+				VlanId:         "100",
+				DatacenterName: &dc,
+				PodName:        &pod,
+			},
+		},
+		"default/net-st-2": {
+			ObjectMeta: metav1.ObjectMeta{Name: "net-st-2", Namespace: "default"},
+			Spec: v1.NetworkSpec{
+				PortGroupName:  "pg-101",
+				VlanId:         "101",
+				DatacenterName: &dc,
+				PodName:        &pod,
+			},
+		},
+		"default/net-mt-1": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "net-mt-1",
+				Namespace: "default",
+				Labels:    map[string]string{v1.NetworkTypeLabel: "multi-tenant"},
+			},
+			Spec: v1.NetworkSpec{
+				PortGroupName:  "pg-200",
+				VlanId:         "200",
+				DatacenterName: &dc,
+				PodName:        &pod,
+			},
+		},
+		"default/net-mt-2": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "net-mt-2",
+				Namespace: "default",
+				Labels:    map[string]string{v1.NetworkTypeLabel: "multi-tenant"},
+			},
+			Spec: v1.NetworkSpec{
+				PortGroupName:  "pg-201",
+				VlanId:         "201",
+				DatacenterName: &dc,
+				PodName:        &pod,
+			},
+		},
+	}
+
+	pools = map[string]*v1.Pool{
+		"default/pool1": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool1", Namespace: "default"},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Server: server,
+						Topology: configv1.VSpherePlatformTopology{
+							Networks: []string{
+								"/dc1/network/pg-100",
+								"/dc1/network/pg-101",
+								"/dc1/network/pg-200",
+								"/dc1/network/pg-201",
+							},
+						},
+					},
+				},
+				IBMPoolSpec:     v1.IBMPoolSpec{Datacenter: dc, Pod: pod},
+				OverCommitRatio: "1.0",
+			},
+		},
+	}
+
+	leases = map[string]*v1.Lease{
+		"default/lease1": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "lease1",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Pool", Name: "pool1"},
+				},
+			},
+			Spec: v1.LeaseSpec{NetworkType: v1.NetworkTypeSingleTenant},
+			Status: v1.LeaseStatus{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Server: server,
+						Topology: configv1.VSpherePlatformTopology{
+							Networks: []string{"/dc1/network/pg-100", "/dc1/network/pg-200"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	outList := reconcilePoolStates()
+	if len(outList) != 1 {
+		t.Fatalf("expected 1 pool, got %d", len(outList))
+	}
+	status := outList[0].Status
+
+	if status.SingleTenantNetworksTotal != 2 {
+		t.Errorf("expected single-tenant total = 2, got %d", status.SingleTenantNetworksTotal)
+	}
+	if status.SingleTenantNetworksAvailable != 1 {
+		t.Errorf("expected single-tenant available = 1, got %d", status.SingleTenantNetworksAvailable)
+	}
+	if status.MultiTenantNetworksTotal != 2 {
+		t.Errorf("expected multi-tenant total = 2, got %d", status.MultiTenantNetworksTotal)
+	}
+	if status.MultiTenantNetworksAvailable != 1 {
+		t.Errorf("expected multi-tenant available = 1, got %d", status.MultiTenantNetworksAvailable)
+	}
+
+	if status.NetworkAvailable != status.SingleTenantNetworksAvailable+status.MultiTenantNetworksAvailable {
+		t.Errorf("NetworkAvailable (%d) != single+multi available (%d)",
+			status.NetworkAvailable, status.SingleTenantNetworksAvailable+status.MultiTenantNetworksAvailable)
+	}
+	totalNetworks := len(outList[0].Spec.Topology.Networks)
+	if totalNetworks != status.SingleTenantNetworksTotal+status.MultiTenantNetworksTotal {
+		t.Errorf("total networks (%d) != single+multi total (%d)",
+			totalNetworks, status.SingleTenantNetworksTotal+status.MultiTenantNetworksTotal)
 	}
 }
 

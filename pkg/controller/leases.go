@@ -240,15 +240,46 @@ func reconcilePoolStates() []*v1.Pool {
 
 	for _, pool := range outList {
 		availableNetworks := 0
+
+		portGroupType := make(map[string]string)
+		for _, network := range getNetworksForPool(pool) {
+			portGroupType[network.Spec.PortGroupName] = getNetworkType(network)
+		}
+
+		var stTotal, stAvail, mtTotal, mtAvail int
+
 		for _, network := range pool.Spec.Topology.Networks {
 			_, networkName := path.Split(network)
 			dcId := fmt.Sprintf("dcid-%s-%s", pool.Spec.IBMPoolSpec.Datacenter, pool.Spec.IBMPoolSpec.Pod)
 			serverNetworks := networksInUse[dcId]
-			if _, ok := serverNetworks[networkName]; !ok {
+			_, inUse := serverNetworks[networkName]
+			if !inUse {
 				availableNetworks++
 			}
+
+			netType, ok := portGroupType[networkName]
+			if !ok {
+				netType = string(v1.NetworkTypeSingleTenant)
+			}
+
+			if netType == string(v1.NetworkTypeMultiTenant) {
+				mtTotal++
+				if !inUse {
+					mtAvail++
+				}
+			} else if netType == string(v1.NetworkTypeSingleTenant) {
+				stTotal++
+				if !inUse {
+					stAvail++
+				}
+			}
 		}
+
 		pool.Status.NetworkAvailable = availableNetworks
+		pool.Status.SingleTenantNetworksTotal = stTotal
+		pool.Status.SingleTenantNetworksAvailable = stAvail
+		pool.Status.MultiTenantNetworksTotal = mtTotal
+		pool.Status.MultiTenantNetworksAvailable = mtAvail
 	}
 
 	return outList
@@ -482,6 +513,36 @@ func (l *LeaseReconciler) resolveCommonNetworksForPool(candidates []*v1.Network,
 		}
 	}
 	return poolFiltered
+}
+
+// commonPortGroupNames returns the set of port group names that currently have at least
+// one available network of networkType (including the single-tenant fallback when
+// AllowMultiToUseSingle is set) in every one of the given pools. Used to restrict a
+// multi-pool lease's first network pick to one all the other assigned pools can also
+// satisfy, since pools can structurally lack a VLAN another pool happens to offer.
+func (l *LeaseReconciler) commonPortGroupNames(pools []*v1.Pool, networkType v1.NetworkType) map[string]bool {
+	common := make(map[string]bool)
+	for i, pool := range pools {
+		portGroups := make(map[string]bool)
+		for _, n := range l.getAvailableNetworks(pool, networkType) {
+			portGroups[n.Spec.PortGroupName] = true
+		}
+		if l.AllowMultiToUseSingle && networkType == v1.NetworkTypeMultiTenant {
+			for _, n := range l.getAvailableNetworks(pool, v1.NetworkTypeSingleTenant) {
+				portGroups[n.Spec.PortGroupName] = true
+			}
+		}
+		if i == 0 {
+			common = portGroups
+			continue
+		}
+		for name := range common {
+			if !portGroups[name] {
+				delete(common, name)
+			}
+		}
+	}
+	return common
 }
 
 // failLeaseIfUnsatisfiable checks whether lease can ever be fulfilled given the full pool
@@ -1184,6 +1245,20 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	log.Printf("Lease %v needs %d pools × %d networks = %d total networks", lease.Name, requiredPools, networksPerPool, totalNetworksNeeded)
 
+	// For multi-pool leases, the network picked for the first pool must also exist in every
+	// other assigned pool, or later pools can end up with no matching network at all (e.g. a
+	// pool in one site has no port group for a VLAN that happens to be common to the other,
+	// same-site pools). Restrict the first pool's candidates to this cross-pool-common set;
+	// an empty result means no network is common to every assigned pool, so none should be
+	// assigned this round rather than locking a VLAN into pools that can't all share it.
+	var commonPortGroups map[string]bool
+	if len(assignedPools) > 1 {
+		commonPortGroups = l.commonPortGroupNames(assignedPools, lease.Spec.NetworkType)
+		if len(commonPortGroups) == 0 {
+			log.Printf("lease %s: no network is available in all %d assigned pools; cannot assign a shared network this round", lease.Name, len(assignedPools))
+		}
+	}
+
 	// Process each pool and assign networks
 	for poolIdx, currentPool := range assignedPools {
 		// Get networks available in this pool
@@ -1241,7 +1316,18 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			// For the first pool, we assign networks and track their VLANs
 			// For subsequent pools, we try to match VLANs from the first pool
 			if poolIdx == 0 {
-				// First pool: assign any available networks
+				// First pool: assign any available network, but only one that's also
+				// available in every other assigned pool (see commonPortGroups above) -
+				// otherwise we'd lock in a choice a later pool can never match.
+				if commonPortGroups != nil {
+					filtered := make([]*v1.Network, 0, len(availableNetworks))
+					for _, n := range availableNetworks {
+						if commonPortGroups[n.Spec.PortGroupName] {
+							filtered = append(filtered, n)
+						}
+					}
+					availableNetworks = filtered
+				}
 				for idx := 0; poolNetworkCount < networksPerPool && idx < len(availableNetworks); idx++ {
 					network := availableNetworks[idx]
 					if !doesLeaseContainPortGroup(lease, currentPool, network) {
