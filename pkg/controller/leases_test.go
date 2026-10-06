@@ -722,6 +722,144 @@ func TestUpdateNetworkTypeMetrics(t *testing.T) {
 	}
 }
 
+func TestReconcilePoolStatesNetworkTypeSplit(t *testing.T) {
+	dc := "dc1"
+	pod := "pod1"
+	server := "vcenter1.example.com"
+
+	oldPools := pools
+	oldNetworks := networks
+	oldLeases := leases
+	defer func() {
+		pools = oldPools
+		networks = oldNetworks
+		leases = oldLeases
+	}()
+
+	networks = map[string]*v1.Network{
+		"default/net-st-1": {
+			ObjectMeta: metav1.ObjectMeta{Name: "net-st-1", Namespace: "default"},
+			Spec: v1.NetworkSpec{
+				PortGroupName:  "pg-100",
+				VlanId:         "100",
+				DatacenterName: &dc,
+				PodName:        &pod,
+			},
+		},
+		"default/net-st-2": {
+			ObjectMeta: metav1.ObjectMeta{Name: "net-st-2", Namespace: "default"},
+			Spec: v1.NetworkSpec{
+				PortGroupName:  "pg-101",
+				VlanId:         "101",
+				DatacenterName: &dc,
+				PodName:        &pod,
+			},
+		},
+		"default/net-mt-1": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "net-mt-1",
+				Namespace: "default",
+				Labels:    map[string]string{v1.NetworkTypeLabel: "multi-tenant"},
+			},
+			Spec: v1.NetworkSpec{
+				PortGroupName:  "pg-200",
+				VlanId:         "200",
+				DatacenterName: &dc,
+				PodName:        &pod,
+			},
+		},
+		"default/net-mt-2": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "net-mt-2",
+				Namespace: "default",
+				Labels:    map[string]string{v1.NetworkTypeLabel: "multi-tenant"},
+			},
+			Spec: v1.NetworkSpec{
+				PortGroupName:  "pg-201",
+				VlanId:         "201",
+				DatacenterName: &dc,
+				PodName:        &pod,
+			},
+		},
+	}
+
+	pools = map[string]*v1.Pool{
+		"default/pool1": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool1", Namespace: "default"},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Server: server,
+						Topology: configv1.VSpherePlatformTopology{
+							Networks: []string{
+								"/dc1/network/pg-100",
+								"/dc1/network/pg-101",
+								"/dc1/network/pg-200",
+								"/dc1/network/pg-201",
+							},
+						},
+					},
+				},
+				IBMPoolSpec:     v1.IBMPoolSpec{Datacenter: dc, Pod: pod},
+				OverCommitRatio: "1.0",
+			},
+		},
+	}
+
+	leases = map[string]*v1.Lease{
+		"default/lease1": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "lease1",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Pool", Name: "pool1"},
+				},
+			},
+			Spec: v1.LeaseSpec{NetworkType: v1.NetworkTypeSingleTenant},
+			Status: v1.LeaseStatus{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Server: server,
+						Topology: configv1.VSpherePlatformTopology{
+							Networks: []string{"/dc1/network/pg-100", "/dc1/network/pg-200"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	outList := reconcilePoolStates()
+	if len(outList) != 1 {
+		t.Fatalf("expected 1 pool, got %d", len(outList))
+	}
+	status := outList[0].Status
+
+	if status.SingleTenantNetworksTotal != 2 {
+		t.Errorf("expected single-tenant total = 2, got %d", status.SingleTenantNetworksTotal)
+	}
+	if status.SingleTenantNetworksAvailable != 1 {
+		t.Errorf("expected single-tenant available = 1, got %d", status.SingleTenantNetworksAvailable)
+	}
+	if status.MultiTenantNetworksTotal != 2 {
+		t.Errorf("expected multi-tenant total = 2, got %d", status.MultiTenantNetworksTotal)
+	}
+	if status.MultiTenantNetworksAvailable != 1 {
+		t.Errorf("expected multi-tenant available = 1, got %d", status.MultiTenantNetworksAvailable)
+	}
+
+	if status.NetworkAvailable != status.SingleTenantNetworksAvailable+status.MultiTenantNetworksAvailable {
+		t.Errorf("NetworkAvailable (%d) != single+multi available (%d)",
+			status.NetworkAvailable, status.SingleTenantNetworksAvailable+status.MultiTenantNetworksAvailable)
+	}
+	totalNetworks := len(outList[0].Spec.Topology.Networks)
+	if totalNetworks != status.SingleTenantNetworksTotal+status.MultiTenantNetworksTotal {
+		t.Errorf("total networks (%d) != single+multi total (%d)",
+			totalNetworks, status.SingleTenantNetworksTotal+status.MultiTenantNetworksTotal)
+	}
+}
+
 func TestUpdateLeaseMetrics(t *testing.T) {
 	oldLeases := leases
 	oldPools := pools

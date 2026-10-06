@@ -25,6 +25,12 @@ spec:
     - jsonPath: .status.network-available
       name: Networks
       type: string
+    - jsonPath: .status.single-tenant-networks-available
+      name: ST-Net
+      type: string
+    - jsonPath: .status.multi-tenant-networks-available
+      name: MT-Net
+      type: string
     - jsonPath: .spec.noSchedule
       name: Disabled
       type: string
@@ -248,9 +254,25 @@ spec:
                 description: memory-available is the amount of memory in GB available
                   in the pool
                 type: integer
+              multi-tenant-networks-available:
+                description: multi-tenant-networks-available is the number of multi-tenant
+                  networks available in the pool
+                type: integer
+              multi-tenant-networks-total:
+                description: multi-tenant-networks-total is the total number of multi-tenant
+                  networks assigned to the pool
+                type: integer
               network-available:
                 description: network-available is the number of networks available
                   in the pool
+                type: integer
+              single-tenant-networks-available:
+                description: single-tenant-networks-available is the number of single-tenant
+                  networks available in the pool
+                type: integer
+              single-tenant-networks-total:
+                description: single-tenant-networks-total is the total number of single-tenant
+                  networks assigned to the pool
                 type: integer
               vcpus-available:
                 description: vcpus-available is the number of vCPUs available in the

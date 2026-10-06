@@ -185,6 +185,14 @@ def safe_percentage(numerator, denominator):
         return 0.0
     return numerator / denominator
 
+def getNetworkTypeAvailability(pool):
+    """Return (single_tenant_pct, multi_tenant_pct) for a pool, falling back to 0
+    when the operator hasn't written the per-type status fields yet."""
+    status = pool["status"]
+    st_pct = safe_percentage(status.get("single-tenant-networks-available", 0), status.get("single-tenant-networks-total", 0))
+    mt_pct = safe_percentage(status.get("multi-tenant-networks-available", 0), status.get("multi-tenant-networks-total", 0))
+    return st_pct, mt_pct
+
 def getHealthIndicator(pool):
     """Return health indicator based on pool capacity."""
     cpu_pct = safe_percentage(pool["status"]["vcpus-available"], pool["spec"]["vcpus"])
@@ -268,7 +276,8 @@ def printStatusRich(includeExcluded, sortBy="name"):
     table.add_column("Pool Name", style="cyan bold", no_wrap=True)
     table.add_column("CPU", justify="right", no_wrap=True)
     table.add_column("Memory", justify="right", no_wrap=True)
-    table.add_column("Network", justify="right", no_wrap=True)
+    table.add_column("ST Net", justify="right", no_wrap=True)
+    table.add_column("MT Net", justify="right", no_wrap=True)
     table.add_column("Leases", justify="center", no_wrap=True)
     table.add_column("Cordoned", justify="center", no_wrap=True)
     table.add_column("Excluded", justify="center", no_wrap=True)
@@ -279,12 +288,13 @@ def printStatusRich(includeExcluded, sortBy="name"):
 
         cpu_pct = safe_percentage(pool["status"]["vcpus-available"], pool["spec"]["vcpus"])
         mem_pct = safe_percentage(pool["status"]["memory-available"], pool["spec"]["memory"])
-        net_pct = safe_percentage(pool["status"]["network-available"], len(pool["spec"]["topology"]["networks"]))
+        st_net_pct, mt_net_pct = getNetworkTypeAvailability(pool)
 
         health = getHealthIndicator(pool)
         cpu_text = formatPercentageRich(cpu_pct, "")
         mem_text = formatPercentageRich(mem_pct, "")
-        net_text = formatPercentageRich(net_pct, "")
+        st_net_text = formatPercentageRich(st_net_pct, "")
+        mt_net_text = formatPercentageRich(mt_net_pct, "")
 
         lease_text = Text(str(len(leases)), style="bold" if len(leases) > 0 else "dim")
         cordoned = getBoolSymbol(pool["spec"]["noSchedule"])
@@ -295,7 +305,8 @@ def printStatusRich(includeExcluded, sortBy="name"):
             pool["metadata"]["name"],
             cpu_text,
             mem_text,
-            net_text,
+            st_net_text,
+            mt_net_text,
             lease_text,
             cordoned,
             excluded
@@ -372,12 +383,15 @@ def printStatus(includeExcluded, outputFormat="plain", sortBy="name"):
 
         cpuUsage    = "CPU: " + format(safe_percentage(pool["status"]["vcpus-available"], pool["spec"]["vcpus"]), ".0%")
         memoryUsage = "Memory: " + format(safe_percentage(pool["status"]["memory-available"], pool["spec"]["memory"]), ".0%")
-        networkUsage = "Network: " + format(safe_percentage(pool["status"]["network-available"], len(pool["spec"]["topology"]["networks"])), ".0%")
+        st_net_pct, mt_net_pct = getNetworkTypeAvailability(pool)
+        stNetworkUsage = "ST-Net: " + format(st_net_pct, ".0%")
+        mtNetworkUsage = "MT-Net: " + format(mt_net_pct, ".0%")
         poolLeaseCount = "Leases: " + str(len(leases))
 
         print("| " + pool["metadata"]["name"].ljust(nameMaxLen-2) + "| " + cpuUsage.ljust(usageLen-2) + "| " + str(pool["spec"]["noSchedule"]).ljust(cordonLen-1) + "| " + str(pool["spec"]["exclude"]) .ljust(excludedLen-1) + "|")
         print("| ".ljust(nameMaxLen) + "| " + memoryUsage.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
-        print("| ".ljust(nameMaxLen) + "| " + networkUsage.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
+        print("| ".ljust(nameMaxLen) + "| " + stNetworkUsage.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
+        print("| ".ljust(nameMaxLen) + "| " + mtNetworkUsage.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
         print("| ".ljust(nameMaxLen) + "| " + poolLeaseCount.ljust(usageLen-2) + "| ".ljust(cordonLen-1) + "  | ".ljust(excludedLen) + "   |")
         print(header)
 
@@ -436,12 +450,15 @@ def printStatusJSON(includeExcluded, sortBy="name"):
         cpu_pct = safe_percentage(pool["status"]["vcpus-available"], pool["spec"]["vcpus"])
         mem_pct = safe_percentage(pool["status"]["memory-available"], pool["spec"]["memory"])
         net_pct = safe_percentage(pool["status"]["network-available"], len(pool["spec"]["topology"]["networks"]))
+        st_net_pct, mt_net_pct = getNetworkTypeAvailability(pool)
 
         pool_data = {
             "name": pool["metadata"]["name"],
             "cpu_available_pct": round(cpu_pct, 3),
             "memory_available_pct": round(mem_pct, 3),
             "network_available_pct": round(net_pct, 3),
+            "single_tenant_network_available_pct": round(st_net_pct, 3),
+            "multi_tenant_network_available_pct": round(mt_net_pct, 3),
             "lease_count": len(leases),
             "cordoned": pool["spec"]["noSchedule"],
             "excluded": pool["spec"]["exclude"],

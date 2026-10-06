@@ -240,15 +240,46 @@ func reconcilePoolStates() []*v1.Pool {
 
 	for _, pool := range outList {
 		availableNetworks := 0
+
+		portGroupType := make(map[string]string)
+		for _, network := range getNetworksForPool(pool) {
+			portGroupType[network.Spec.PortGroupName] = getNetworkType(network)
+		}
+
+		var stTotal, stAvail, mtTotal, mtAvail int
+
 		for _, network := range pool.Spec.Topology.Networks {
 			_, networkName := path.Split(network)
 			dcId := fmt.Sprintf("dcid-%s-%s", pool.Spec.IBMPoolSpec.Datacenter, pool.Spec.IBMPoolSpec.Pod)
 			serverNetworks := networksInUse[dcId]
-			if _, ok := serverNetworks[networkName]; !ok {
+			_, inUse := serverNetworks[networkName]
+			if !inUse {
 				availableNetworks++
 			}
+
+			netType, ok := portGroupType[networkName]
+			if !ok {
+				netType = string(v1.NetworkTypeSingleTenant)
+			}
+
+			if netType == string(v1.NetworkTypeMultiTenant) {
+				mtTotal++
+				if !inUse {
+					mtAvail++
+				}
+			} else if netType == string(v1.NetworkTypeSingleTenant) {
+				stTotal++
+				if !inUse {
+					stAvail++
+				}
+			}
 		}
+
 		pool.Status.NetworkAvailable = availableNetworks
+		pool.Status.SingleTenantNetworksTotal = stTotal
+		pool.Status.SingleTenantNetworksAvailable = stAvail
+		pool.Status.MultiTenantNetworksTotal = mtTotal
+		pool.Status.MultiTenantNetworksAvailable = mtAvail
 	}
 
 	return outList
