@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"sort"
 	"testing"
 
@@ -534,6 +535,82 @@ func TestResolveCommonNetworksForPool(t *testing.T) {
 			t.Fatalf("expected no fallback candidates for a sibling with an empty PortGroupName, got %v", got)
 		}
 	})
+}
+
+// TestCommonPortGroupNames reproduces the vsphere-elastic-69 incident: three pools in one
+// IBM pod share port group "ci-vlan-1284-3", but a fourth pool (a different site that
+// happens to be tagged with the same IBMPoolSpec.Pod) never has that port group - only
+// "ci-vlan-1108", which all four pools share. The first pool's network pick must be
+// restricted to the latter, or the fourth pool can never be assigned a matching network.
+func TestCommonPortGroupNames(t *testing.T) {
+	pod := "dal10.pod03"
+
+	mkNetwork := func(name, dc, portGroup, vlan string) *v1.Network {
+		dcCopy := dc
+		return &v1.Network{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   name,
+				Labels: map[string]string{v1.NetworkTypeLabel: "multi-tenant"},
+			},
+			TypeMeta: metav1.TypeMeta{Kind: "Network"},
+			Spec: v1.NetworkSpec{
+				PortGroupName:  portGroup,
+				VlanId:         vlan,
+				DatacenterName: &dcCopy,
+				PodName:        &pod,
+			},
+		}
+	}
+
+	mkPool := func(name, dcPath string, portGroups []string) *v1.Pool {
+		netPaths := make([]string, len(portGroups))
+		for i, pg := range portGroups {
+			netPaths[i] = fmt.Sprintf("/%s/network/%s", dcPath, pg)
+		}
+		return &v1.Pool{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Topology: configv1.VSpherePlatformTopology{Networks: netPaths},
+					},
+				},
+				IBMPoolSpec: v1.IBMPoolSpec{Pod: pod},
+			},
+		}
+	}
+
+	pool1 := mkPool("pool1", "cidatacenter", []string{"ci-vlan-1284-3", "ci-vlan-1108"})
+	pool2 := mkPool("pool2", "cidatacenter-1", []string{"ci-vlan-1284-3", "ci-vlan-1108"})
+	pool3 := mkPool("pool3", "cidatacenter-2", []string{"ci-vlan-1284-3", "ci-vlan-1108"})
+	pool4 := mkPool("pool4", "wldn-120-DC", []string{"ci-vlan-1108"})
+
+	cleanupNetworks := setupTestNetworks(map[string]*v1.Network{
+		"pool1/ci-vlan-1284-3": mkNetwork("pool1/ci-vlan-1284-3", "cidatacenter", "ci-vlan-1284-3", "1284"),
+		"pool1/ci-vlan-1108":   mkNetwork("pool1/ci-vlan-1108", "cidatacenter", "ci-vlan-1108", "1108"),
+		"pool2/ci-vlan-1284-3": mkNetwork("pool2/ci-vlan-1284-3", "cidatacenter-1", "ci-vlan-1284-3", "1284"),
+		"pool2/ci-vlan-1108":   mkNetwork("pool2/ci-vlan-1108", "cidatacenter-1", "ci-vlan-1108", "1108"),
+		"pool3/ci-vlan-1284-3": mkNetwork("pool3/ci-vlan-1284-3", "cidatacenter-2", "ci-vlan-1284-3", "1284"),
+		"pool3/ci-vlan-1108":   mkNetwork("pool3/ci-vlan-1108", "cidatacenter-2", "ci-vlan-1108", "1108"),
+		"pool4/ci-vlan-1108":   mkNetwork("pool4/ci-vlan-1108", "wldn-120-DC", "ci-vlan-1108", "1108"),
+	})
+	defer cleanupNetworks()
+
+	cleanupLeases := setupTestLeases(map[string]*v1.Lease{})
+	defer cleanupLeases()
+
+	reconciler := &LeaseReconciler{}
+	got := reconciler.commonPortGroupNames([]*v1.Pool{pool1, pool2, pool3, pool4}, v1.NetworkTypeMultiTenant)
+
+	if got["ci-vlan-1284-3"] {
+		t.Errorf("ci-vlan-1284-3 is not available in pool4 and must not be reported as common")
+	}
+	if !got["ci-vlan-1108"] {
+		t.Errorf("ci-vlan-1108 is available in all 4 pools and must be reported as common")
+	}
+	if len(got) != 1 {
+		t.Errorf("expected exactly 1 common port group, got %v", got)
+	}
 }
 
 func TestGetNetworkType(t *testing.T) {
