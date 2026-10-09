@@ -109,6 +109,16 @@ func (r *lease) WithPools(poolCount int) *lease {
 	return r
 }
 
+func (r *lease) WithVCenters(vcenters int) *lease {
+	r.lease.Spec.VCenters = vcenters
+	return r
+}
+
+func (r *lease) WithMinVCenters(minVCenters int) *lease {
+	r.lease.Spec.MinVCenters = minVCenters
+	return r
+}
+
 func (r *lease) Build() *v1.Lease {
 	return &r.lease
 }
@@ -185,6 +195,33 @@ func VerifyMultiPoolLease(lease *v1.Lease, expectedPools int, expectedNetworksPe
 	// but may have up to expectedPools * expectedNetworksPerPool
 	if networkCount < expectedNetworksPerPool {
 		return fmt.Errorf("expected at least %d network owner references, found %d", expectedNetworksPerPool, networkCount)
+	}
+
+	return nil
+}
+
+// VerifyMultiVCenterLease checks that a fulfilled multi-pool lease spans at least
+// the expected number of distinct vCenter servers across its poolInfo entries.
+func VerifyMultiVCenterLease(lease *v1.Lease, expectedMinVCenters int) error {
+	if lease.Status.Phase != v1.PHASE_FULFILLED {
+		return fmt.Errorf("lease %s has not been fulfilled, current phase: %s", lease.Name, lease.Status.Phase)
+	}
+
+	if len(lease.Status.PoolInfo) == 0 {
+		return fmt.Errorf("poolInfo is empty for lease %s", lease.Name)
+	}
+
+	servers := make(map[string]bool)
+	for _, poolFailureDomain := range lease.Status.PoolInfo {
+		if poolFailureDomain.Server == "" {
+			return fmt.Errorf("poolInfo entry for lease %s has an empty server", lease.Name)
+		}
+		servers[poolFailureDomain.Server] = true
+	}
+
+	if len(servers) < expectedMinVCenters {
+		return fmt.Errorf("expected lease %s to span at least %d distinct vcenters, found %d: %v",
+			lease.Name, expectedMinVCenters, len(servers), servers)
 	}
 
 	return nil

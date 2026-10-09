@@ -176,7 +176,7 @@ func TestDynamicVCenterFiltering(t *testing.T) {
 				}
 
 				// Count pools per vCenter
-				fittingPools, _ := utils.GetFittingPools(lease, tt.availablePools, nil)
+				fittingPools, _ := utils.GetFittingPools(lease, tt.availablePools, nil, nil)
 				poolsPerVCenter := make(map[string]int)
 				for _, p := range fittingPools {
 					if !vcentersInUse[p.Spec.Server] {

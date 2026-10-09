@@ -1781,4 +1781,198 @@ var _ = Describe("Lease management", func() {
 			}).Should(BeTrue())
 		})
 	})
+
+	It("should acquire lease with multiple pools across multiple vcenters", func() {
+		var lease *v1.Lease
+
+		// By default only one pool per vCenter is schedulable (test.com and
+		// test-2.com). Enable two additional test.com pools so a 3-pool lease
+		// could be satisfied from a single vCenter, proving that min-vcenters
+		// forces the assignment to spread across vCenters.
+		By("enabling two additional test.com pools", func() {
+			for _, poolName := range []string{
+				"test.com-ibmcloud-vcs-mdcnc-workload-1",
+				"test.com-ibmcloud-vcs-mdcnc-workload-2",
+			} {
+				pool := &v1.Pool{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Namespace: "default",
+					Name:      poolName,
+				}, pool)).To(Succeed())
+				pool.Spec.Exclude = false
+				Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+			}
+		})
+
+		By("creating a lease requesting 3 pools from at least 2 vcenters", func() {
+			lease = GetLease().
+				WithShape(SHAPE_SMALL).
+				WithPools(3).
+				WithMinVCenters(2).
+				Build()
+			Expect(lease).NotTo(BeNil())
+			Expect(lease.Spec.MinVCenters).To(Equal(2))
+			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be fulfilled", func() {
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
+				log.Printf("Lease %s phase: %s", lease.Name, lease.Status.Phase)
+				return lease.Status.Phase == v1.PHASE_FULFILLED
+			}, 60*time.Second, 1*time.Second).Should(BeTrue())
+			VerifyCondition(lease, v1.LeaseConditionTypeFulfilled, v1.ConditionTrue)
+		})
+
+		By("verifying lease has 3 pool owner references and networks", func() {
+			Eventually(func() error {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
+				return VerifyMultiPoolLease(lease, 3, lease.Spec.Networks)
+			}).Should(Succeed())
+		})
+
+		By("verifying assigned pools span at least 2 distinct vcenters", func() {
+			Eventually(func() error {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
+				if err := VerifyMultiVCenterLease(lease, 2); err != nil {
+					return err
+				}
+
+				// The only two vCenters in the fixture inventory are test.com and
+				// test-2.com, so a lease spanning 2 distinct vCenters must use both.
+				servers := make(map[string]bool)
+				for _, poolFailureDomain := range lease.Status.PoolInfo {
+					servers[poolFailureDomain.Server] = true
+				}
+				Expect(servers).To(HaveKey("test.com"), "expected a pool from vCenter test.com")
+				Expect(servers).To(HaveKey("test-2.com"), "expected a pool from vCenter test-2.com")
+				return nil
+			}).Should(Succeed())
+		})
+
+		By("deleting the lease", func() {
+			Expect(k8sClient.Delete(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be deleted", func() {
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease) != nil
+			}).Should(BeTrue())
+		})
+
+		By("re-excluding the additional test.com pools", func() {
+			for _, poolName := range []string{
+				"test.com-ibmcloud-vcs-mdcnc-workload-1",
+				"test.com-ibmcloud-vcs-mdcnc-workload-2",
+			} {
+				pool := &v1.Pool{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Namespace: "default",
+					Name:      poolName,
+				}, pool)).To(Succeed())
+				pool.Spec.Exclude = true
+				Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+			}
+		})
+	})
+
+	It("should fail lease whose minimum vcenters cannot be satisfied", func() {
+		var lease *v1.Lease
+
+		By("creating a lease pinned to a single pool but requiring 2 vcenters", func() {
+			// The required-pool constraint restricts structural matches to a
+			// single pool on a single vCenter, so the min-vcenters requirement
+			// can never be satisfied.
+			lease = GetLease().
+				WithShape(SHAPE_SMALL).
+				WithPool("test.com-ibmcloud-vcs-ci-workload").
+				WithPools(2).
+				WithMinVCenters(2).
+				Build()
+			Expect(lease).NotTo(BeNil())
+			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+		})
+
+		By("waiting for lease to be rejected as structurally unsatisfiable", func() {
+			// No combination of pools can ever span 2 vCenters for this lease,
+			// so it should fail fast rather than stay Pending forever.
+			Eventually(func() bool {
+				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease)
+				return lease.Status.Phase == v1.PHASE_FAILED
+			}).Should(BeTrue())
+			VerifyConditionReason(lease, v1.LeaseConditionTypeFulfilled, v1.ConditionFalse, v1.ReasonLeaseUnschedulable)
+		})
+
+		By("deleting the lease", func() {
+			Expect(k8sClient.Delete(ctx, lease)).To(Succeed())
+		})
+	})
+
+	It("should reject leases with contradictory min-vcenters at admission", func() {
+		By("rejecting a lease whose min-vcenters exceeds pools", func() {
+			// A lease requesting 2 pools can never span 3 vCenters because each
+			// pool resides on exactly one vCenter. The CEL validation rules on
+			// the CRD should reject this before it is ever stored.
+			lease := GetLease().
+				WithShape(SHAPE_SMALL).
+				WithPools(2).
+				WithMinVCenters(3).
+				Build()
+			err := k8sClient.Create(ctx, lease)
+			Expect(err).To(HaveOccurred(), "lease with min-vcenters > pools should be rejected at admission")
+			Expect(err.Error()).To(ContainSubstring("min-vcenters must not exceed pools"))
+		})
+
+		By("rejecting a lease whose min-vcenters exceeds the vcenters cap", func() {
+			lease := GetLease().
+				WithShape(SHAPE_SMALL).
+				WithPools(4).
+				WithVCenters(2).
+				WithMinVCenters(3).
+				Build()
+			err := k8sClient.Create(ctx, lease)
+			Expect(err).To(HaveOccurred(), "lease with min-vcenters > vcenters should be rejected at admission")
+			Expect(err.Error()).To(ContainSubstring("min-vcenters must not exceed the vcenters cap"))
+		})
+
+		By("rejecting a lease whose min-vcenters exceeds the default pool count", func() {
+			// pools defaults to 1, so min-vcenters: 2 must be rejected without
+			// pools being set explicitly.
+			lease := GetLease().
+				WithShape(SHAPE_SMALL).
+				WithMinVCenters(2).
+				Build()
+			err := k8sClient.Create(ctx, lease)
+			Expect(err).To(HaveOccurred(), "lease with min-vcenters > default pools should be rejected at admission")
+			Expect(err.Error()).To(ContainSubstring("min-vcenters must not exceed pools"))
+		})
+
+		By("admitting a lease at the min-vcenters boundary", func() {
+			// min-vcenters equal to both pools and the vcenters cap is valid.
+			// The required pool is excluded from scheduling so the lease stays
+			// inert: this spec asserts admission only, not fulfillment.
+			lease := GetLease().
+				WithShape(SHAPE_SMALL).
+				WithPool("test.com-ibmcloud-vcs-mdcnc-workload-3").
+				WithPools(2).
+				WithVCenters(2).
+				WithMinVCenters(2).
+				Build()
+			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, lease)).To(Succeed())
+		})
+
+		By("admitting a lease with min-vcenters and no vcenters cap", func() {
+			// An unset vcenters cap means no limit, so it must not constrain
+			// min-vcenters. The required pool keeps the lease inert as above.
+			lease := GetLease().
+				WithShape(SHAPE_SMALL).
+				WithPool("test.com-ibmcloud-vcs-mdcnc-workload-3").
+				WithPools(3).
+				WithMinVCenters(2).
+				Build()
+			Expect(k8sClient.Create(ctx, lease)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, lease)).To(Succeed())
+		})
+	})
 })
