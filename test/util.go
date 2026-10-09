@@ -3,9 +3,11 @@ package test
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/controller"
@@ -109,8 +111,37 @@ func (r *lease) WithPools(poolCount int) *lease {
 	return r
 }
 
+func (r *lease) WithVCenters(vcenters int) *lease {
+	r.lease.Spec.VCenters = vcenters
+	return r
+}
+
+func (r *lease) WithMinVCenters(minVCenters int) *lease {
+	r.lease.Spec.MinVCenters = minVCenters
+	return r
+}
+
 func (r *lease) Build() *v1.Lease {
 	return &r.lease
+}
+
+// SetPoolExclusion toggles scheduling exclusion for a pool, retrying on
+// resourceVersion conflicts. The reconcilers concurrently update Pool objects
+// (releasing capacity after a lease is deleted, setting short names and
+// network availability), so a single Get/Update pair can lose the race and
+// fail the test with a 409 conflict.
+func SetPoolExclusion(poolName string, exclude bool) {
+	gomega.Eventually(func() error {
+		pool := &v1.Pool{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{
+			Namespace: "default",
+			Name:      poolName,
+		}, pool); err != nil {
+			return err
+		}
+		pool.Spec.Exclude = exclude
+		return k8sClient.Update(ctx, pool)
+	}, 30*time.Second, 1*time.Second).Should(gomega.Succeed())
 }
 
 // IsLeaseOwnedByKinds IsLeaseOwnedByKind checks if the lease is owned by the declared kinds
@@ -185,6 +216,33 @@ func VerifyMultiPoolLease(lease *v1.Lease, expectedPools int, expectedNetworksPe
 	// but may have up to expectedPools * expectedNetworksPerPool
 	if networkCount < expectedNetworksPerPool {
 		return fmt.Errorf("expected at least %d network owner references, found %d", expectedNetworksPerPool, networkCount)
+	}
+
+	return nil
+}
+
+// VerifyMultiVCenterLease checks that a fulfilled multi-pool lease spans at least
+// the expected number of distinct vCenter servers across its poolInfo entries.
+func VerifyMultiVCenterLease(lease *v1.Lease, expectedMinVCenters int) error {
+	if lease.Status.Phase != v1.PHASE_FULFILLED {
+		return fmt.Errorf("lease %s has not been fulfilled, current phase: %s", lease.Name, lease.Status.Phase)
+	}
+
+	if len(lease.Status.PoolInfo) == 0 {
+		return fmt.Errorf("poolInfo is empty for lease %s", lease.Name)
+	}
+
+	servers := make(map[string]bool)
+	for _, poolFailureDomain := range lease.Status.PoolInfo {
+		if poolFailureDomain.Server == "" {
+			return fmt.Errorf("poolInfo entry for lease %s has an empty server", lease.Name)
+		}
+		servers[poolFailureDomain.Server] = true
+	}
+
+	if len(servers) < expectedMinVCenters {
+		return fmt.Errorf("expected lease %s to span at least %d distinct vcenters, found %d: %v",
+			lease.Name, expectedMinVCenters, len(servers), servers)
 	}
 
 	return nil

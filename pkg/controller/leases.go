@@ -932,13 +932,27 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			}
 		}
 
+		// Enforce the minimum vCenter diversity requirement (MinVCenters): while the
+		// lease's assigned pools span fewer vCenters than required, pool selection is
+		// restricted to vCenters not already in use. This guarantees the lease cannot
+		// fill all of its pool slots from fewer vCenters than required.
+		var excludedVCenters map[string]bool
+		vcentersInUse := utils.GetVCentersInUse(assignedPools)
+		diversityVCenters := utils.GetDiversityExcludedVCenters(lease, assignedPools)
+		// diversityPending is true whenever the MinVCenters requirement has not been
+		// met yet (the excluded set is non-nil), including before the first pool is
+		// assigned.
+		diversityPending := diversityVCenters != nil
+		if diversityPending {
+			log.Printf("Lease %s: minimum vCenter diversity in progress, using %d/%d vCenters - excluding vCenters already in use from selection",
+				lease.Name, len(vcentersInUse), lease.Spec.MinVCenters)
+		}
+
 		// Enforce the vCenters cap with smart filtering:
 		// 1. If cap reached: only allow vCenters already in use
 		// 2. If approaching cap with remaining pools > remaining slots: require vCenters with multiple pools
 		// 3. Initial selection (no pools assigned): pre-filter to avoid low-capacity vCenters
-		var excludedVCenters map[string]bool
 		if lease.Spec.VCenters > 0 {
-			vcentersInUse := utils.GetVCentersInUse(assignedPools)
 			remainingVCenterSlots := lease.Spec.VCenters - len(vcentersInUse)
 			remainingPools := requiredPools - len(assignedPools)
 
@@ -955,16 +969,24 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 					}
 				}
 				log.Printf("Lease %s: vCenter cap reached, only allowing vCenters in use", lease.Name)
-			} else if remainingVCenterSlots > 0 && remainingPools > remainingVCenterSlots {
+			} else if !diversityPending && remainingVCenterSlots > 0 && remainingPools > remainingVCenterSlots {
 				// We need multiple pools per remaining vCenter slot
 				// Apply dynamic filtering: exclude vCenters that don't have enough pools
+				//
+				// Note: this heuristic is skipped while minimum vCenter diversity is
+				// pending (see the !diversityPending guard above): it concentrates
+				// assignments onto fewer vCenters, which directly conflicts with
+				// spreading across the required minimum, and can exclude the very
+				// vCenters the lease is required to diversify onto. The hard
+				// "cap reached" rule above cannot trigger while diversifying because
+				// len(vcentersInUse) < MinVCenters <= VCenters.
 				minPoolsPerVCenter := (remainingPools-1)/remainingVCenterSlots + 1
 
 				log.Printf("Lease %s: need %d pools from %d remaining slots, min %d pools per vCenter required",
 					lease.Name, remainingPools, remainingVCenterSlots, minPoolsPerVCenter)
 
 				// Count fitting pools per vCenter
-				fittingPools, _ := utils.GetFittingPools(lease, availablePools, nil)
+				fittingPools, _ := utils.GetFittingPools(lease, availablePools, nil, nil)
 				fittingPoolsPerVCenter := make(map[string]int)
 				for _, p := range fittingPools {
 					if p.Spec.Server != "" && !vcentersInUse[p.Spec.Server] {
@@ -997,7 +1019,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				// that cannot participate in any valid combination.
 
 				// Reuse GetFittingPools to apply consistent filtering logic
-				fittingPools, _ := utils.GetFittingPools(lease, availablePools, nil)
+				fittingPools, _ := utils.GetFittingPools(lease, availablePools, nil, nil)
 
 				// Group fitting pools by vCenter and count them
 				fittingPoolsPerVCenter := make(map[string][]*v1.Pool)
@@ -1105,20 +1127,24 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			log.Printf("Lease %s: %d vCenters excluded from pool selection", lease.Name, len(excludedVCenters))
 		}
 
-		pool, err := utils.GetPoolWithStrategy(lease, availablePools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED, excludedVCenters)
+		pool, err := utils.GetPoolWithStrategy(lease, availablePools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED, excludedVCenters, diversityVCenters)
 		if err != nil {
 			log.Printf("GetPoolWithStrategy error for lease %s: %v", lease.Name, err)
 
-			// If we already have some pools assigned but can't get more due to vCenter filtering constraints,
-			// we should release what we have and go back to PENDING to try again later with different pools
-			if len(assignedPools) > 0 && lease.Spec.VCenters > 0 {
-				vcentersInUse := utils.GetVCentersInUse(assignedPools)
-
+			// If we already have some pools assigned but can't get more due to vCenter
+			// constraints, we should release what we have and go back to PENDING to try
+			// again later with different pools, or wait at PARTIAL when the constraint
+			// is a pending minimum vCenter diversity requirement (a new vCenter may
+			// become available later).
+			if len(assignedPools) > 0 && (lease.Spec.VCenters > 0 || lease.Spec.MinVCenters > 0) {
 				// Check if we're stuck because of vCenter constraints:
 				// 1. Cap reached: using all allowed vCenters
 				// 2. Dynamic filtering: excluded remaining vCenters due to insufficient pool count
-				capReached := len(vcentersInUse) >= lease.Spec.VCenters
-				dynamicFilteringApplied := len(excludedVCenters) > 0 && !capReached
+				// While minimum vCenter diversity is pending, neither applies: the lease is
+				// simply waiting for capacity on a new vCenter, which is normal PARTIAL
+				// behavior, and cap heuristics are skipped entirely in that case.
+				capReached := lease.Spec.VCenters > 0 && len(vcentersInUse) >= lease.Spec.VCenters
+				dynamicFilteringApplied := !diversityPending && len(excludedVCenters) > 0 && !capReached
 
 				if capReached || dynamicFilteringApplied {
 					reason := "vCenter cap"
@@ -1169,8 +1195,14 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 					return ctrl.Result{RequeueAfter: LEASE_PENDING_RETRY_INTERVAL}, nil
 				}
 
-				// Otherwise just mark as partial (not vCenter filtering related)
-				log.Printf("lease %s needs %d pools but only %d available (insufficient pool resources, not vCenter filtering)", lease.Name, requiredPools, len(assignedPools))
+				// Otherwise just mark as partial (waiting on resources or a new vCenter
+				// for the diversity requirement, not on a vCenter filtering dead-end)
+				if diversityPending {
+					log.Printf("lease %s needs %d pools but only %d assigned, and is waiting for a pool on a new vCenter to satisfy the minimum of %d vCenters",
+						lease.Name, requiredPools, len(assignedPools), lease.Spec.MinVCenters)
+				} else {
+					log.Printf("lease %s needs %d pools but only %d available (insufficient pool resources, not vCenter filtering)", lease.Name, requiredPools, len(assignedPools))
+				}
 				break
 			}
 
@@ -1532,6 +1564,13 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		var reason string
 		if !poolsFulfilled {
 			reason = fmt.Sprintf("lease is currently assigned %d of %d pools", len(assignedPools), requiredPools)
+			if lease.Spec.MinVCenters > 0 {
+				vcentersInUse := utils.GetVCentersInUse(assignedPools)
+				if len(vcentersInUse) < lease.Spec.MinVCenters {
+					reason += fmt.Sprintf(", spanning %d of %d required vCenters",
+						len(vcentersInUse), lease.Spec.MinVCenters)
+				}
+			}
 		} else if !allPoolsHaveNetworks {
 			reason = fmt.Sprintf("pools do not all have required networks (need %d networks per pool, minimum assigned: %d)",
 				lease.Spec.Networks, minNetworksAssigned)

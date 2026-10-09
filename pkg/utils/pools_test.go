@@ -931,7 +931,7 @@ func TestGetFittingPools(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fittingPools, poolResults := GetFittingPools(tt.lease, tt.pools, tt.excludedVCenters)
+			fittingPools, poolResults := GetFittingPools(tt.lease, tt.pools, tt.excludedVCenters, nil)
 
 			if len(fittingPools) != tt.expectedFittingLen {
 				t.Errorf("GetFittingPools() returned %d fitting pools, expected %d",
@@ -1343,7 +1343,7 @@ func TestGetFittingPoolsWithVCenterCap(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fittingPools, results := GetFittingPools(tt.lease, tt.pools, tt.excludedVCenters)
+			fittingPools, results := GetFittingPools(tt.lease, tt.pools, tt.excludedVCenters, nil)
 
 			if len(fittingPools) != tt.expectedFittingCount {
 				t.Errorf("Expected %d fitting pools, got %d", tt.expectedFittingCount, len(fittingPools))
@@ -1491,7 +1491,7 @@ func TestGetPoolWithStrategyMultiVCenterConstraint(t *testing.T) {
 		"vcenter1.example.com": true,
 	}
 
-	pool, err := GetPoolWithStrategy(lease, pools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED, excludedVCenters)
+	pool, err := GetPoolWithStrategy(lease, pools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED, excludedVCenters, nil)
 	if err != nil {
 		t.Fatalf("GetPoolWithStrategy failed: %v", err)
 	}
@@ -1651,7 +1651,7 @@ func TestGetPoolWithStrategyVCenters2Pools3(t *testing.T) {
 		"vcenter1.example.com": true,
 	}
 
-	pool, err := GetPoolWithStrategy(lease, pools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED, excludedVCenters)
+	pool, err := GetPoolWithStrategy(lease, pools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED, excludedVCenters, nil)
 	if err != nil {
 		t.Fatalf("GetPoolWithStrategy failed: %v", err)
 	}
@@ -1891,5 +1891,539 @@ func TestIsLeaseSatisfiable(t *testing.T) {
 				t.Errorf("IsLeaseSatisfiable() reason = %q, expected it to contain %q", reason, tt.reasonSubstring)
 			}
 		})
+	}
+}
+
+func TestIsLeaseSatisfiableMinVCenters(t *testing.T) {
+	tests := []struct {
+		name            string
+		lease           *v1.Lease
+		pools           []*v1.Pool
+		expected        bool
+		reasonSubstring string
+	}{
+		{
+			name: "minimum not exceeding pools or inventory is satisfiable",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 3, MinVCenters: 2},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc1-pool2", "vcenter1.example.com"),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+			},
+			expected: true,
+		},
+		{
+			name: "minimum equal to pools and inventory is satisfiable",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 2, MinVCenters: 2},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+			},
+			expected: true,
+		},
+		{
+			name: "minimum exceeding requested pools fails with a specific reason",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 1, MinVCenters: 2},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+			},
+			expected:        false,
+			reasonSubstring: "minimum of 2 vcenters but only requests 1 pool",
+		},
+		{
+			name: "minimum with default pool count of 1 fails",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{MinVCenters: 2},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+			},
+			expected:        false,
+			reasonSubstring: "minimum of 2 vcenters but only requests 1 pool",
+		},
+		{
+			name: "minimum exceeding the vcenters cap fails with a specific reason",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 4, VCenters: 2, MinVCenters: 3},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+				testPool("vc3-pool1", "vcenter3.example.com"),
+			},
+			expected:        false,
+			reasonSubstring: "minimum vcenters (3) exceeds its maximum vcenters cap (2)",
+		},
+		{
+			name: "inventory with fewer distinct vcenters than the minimum fails with a specific reason",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 3, MinVCenters: 2},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc1-pool2", "vcenter1.example.com"),
+				testPool("vc1-pool3", "vcenter1.example.com"),
+			},
+			expected:        false,
+			reasonSubstring: "at least 2 distinct vcenters but only 1 vcenter(s) have structurally matching pools",
+		},
+		{
+			name: "poolSelector narrowing to a single vcenter fails the minimum",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{
+					Pools:        2,
+					MinVCenters:  2,
+					PoolSelector: map[string]string{"region": "us-west"},
+				},
+			},
+			pools: []*v1.Pool{
+				func() *v1.Pool {
+					p := testPool("vc1-pool1", "vcenter1.example.com")
+					p.Labels = map[string]string{"region": "us-west"}
+					return p
+				}(),
+				func() *v1.Pool {
+					p := testPool("vc1-pool2", "vcenter1.example.com")
+					p.Labels = map[string]string{"region": "us-west"}
+					return p
+				}(),
+				testPool("vc2-pool1", "vcenter2.example.com"), // no matching label
+			},
+			expected:        false,
+			reasonSubstring: "at least 2 distinct vcenters but only 1 vcenter(s) have structurally matching pools",
+		},
+		{
+			name: "requiredPool pinned lease cannot satisfy a minimum of 2 vcenters",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 2, RequiredPool: "vc1-pool1", MinVCenters: 2},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+			},
+			expected:        false,
+			reasonSubstring: "at least 2 distinct vcenters but only 1 vcenter(s) have structurally matching pools",
+		},
+		{
+			name: "minimum within cap and inventory is satisfiable",
+			lease: &v1.Lease{
+				Spec: v1.LeaseSpec{Pools: 4, VCenters: 3, MinVCenters: 2},
+			},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc1-pool2", "vcenter1.example.com"),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+				testPool("vc3-pool1", "vcenter3.example.com"),
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ok, reason := IsLeaseSatisfiable(tt.lease, tt.pools)
+			if ok != tt.expected {
+				t.Errorf("IsLeaseSatisfiable() = (%v, %q), expected ok=%v", ok, reason, tt.expected)
+			}
+			if !ok && reason == "" {
+				t.Errorf("IsLeaseSatisfiable() returned false with no reason")
+			}
+			if ok && reason != "" {
+				t.Errorf("IsLeaseSatisfiable() returned true with a non-empty reason %q", reason)
+			}
+			if tt.reasonSubstring != "" && !strings.Contains(reason, tt.reasonSubstring) {
+				t.Errorf("IsLeaseSatisfiable() reason = %q, expected it to contain %q", reason, tt.reasonSubstring)
+			}
+		})
+	}
+}
+
+func TestGetDiversityExcludedVCenters(t *testing.T) {
+	tests := []struct {
+		name          string
+		lease         *v1.Lease
+		assignedPools []*v1.Pool
+		expectedNil   bool
+		expected      map[string]bool
+	}{
+		{
+			name:  "nil when MinVCenters is unset",
+			lease: &v1.Lease{Spec: v1.LeaseSpec{Pools: 2}},
+			assignedPools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+			},
+			expectedNil: true,
+		},
+		{
+			name:  "nil when MinVCenters already satisfied",
+			lease: &v1.Lease{Spec: v1.LeaseSpec{Pools: 3, MinVCenters: 2}},
+			assignedPools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+			},
+			expectedNil: true,
+		},
+		{
+			name:          "empty but non-nil before any pool is assigned",
+			lease:         &v1.Lease{Spec: v1.LeaseSpec{Pools: 2, MinVCenters: 2}},
+			assignedPools: []*v1.Pool{},
+			expected:      map[string]bool{},
+		},
+		{
+			name:  "excludes vCenters in use while the minimum is pending",
+			lease: &v1.Lease{Spec: v1.LeaseSpec{Pools: 3, MinVCenters: 2}},
+			assignedPools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc1-pool2", "vcenter1.example.com"),
+			},
+			expected: map[string]bool{
+				"vcenter1.example.com": true,
+			},
+		},
+		{
+			name:  "counts distinct vCenters, not assigned pools",
+			lease: &v1.Lease{Spec: v1.LeaseSpec{Pools: 3, MinVCenters: 3}},
+			assignedPools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+			},
+			expected: map[string]bool{
+				"vcenter1.example.com": true,
+				"vcenter2.example.com": true,
+			},
+		},
+		{
+			name:  "minimum of 1 is satisfied by any first assignment",
+			lease: &v1.Lease{Spec: v1.LeaseSpec{Pools: 2, MinVCenters: 1}},
+			assignedPools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+			},
+			expectedNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetDiversityExcludedVCenters(tt.lease, tt.assignedPools)
+			if tt.expectedNil {
+				if got != nil {
+					t.Errorf("GetDiversityExcludedVCenters() = %v, expected nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("GetDiversityExcludedVCenters() = nil, expected %v", tt.expected)
+			}
+			if len(got) != len(tt.expected) {
+				t.Fatalf("GetDiversityExcludedVCenters() = %v, expected %v", got, tt.expected)
+			}
+			for server := range tt.expected {
+				if !got[server] {
+					t.Errorf("GetDiversityExcludedVCenters() = %v, expected %v to contain %s", got, tt.expected, server)
+				}
+			}
+		})
+	}
+}
+
+func TestCountDistinctVCenters(t *testing.T) {
+	tests := []struct {
+		name     string
+		lease    *v1.Lease
+		pools    []*v1.Pool
+		expected int
+	}{
+		{
+			name:  "counts distinct servers across matching pools",
+			lease: &v1.Lease{Spec: v1.LeaseSpec{Pools: 3}},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc1-pool2", "vcenter1.example.com"),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+				testPool("vc3-pool1", "vcenter3.example.com"),
+			},
+			expected: 3,
+		},
+		{
+			name:  "excluded pools do not count",
+			lease: &v1.Lease{Spec: v1.LeaseSpec{Pools: 2}},
+			pools: []*v1.Pool{
+				func() *v1.Pool {
+					p := testPool("vc1-pool1", "vcenter1.example.com")
+					p.Spec.Exclude = true
+					return p
+				}(),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+			},
+			expected: 1,
+		},
+		{
+			name:  "noSchedule pools do not count",
+			lease: &v1.Lease{Spec: v1.LeaseSpec{Pools: 2}},
+			pools: []*v1.Pool{
+				func() *v1.Pool {
+					p := testPool("vc1-pool1", "vcenter1.example.com")
+					p.Spec.NoSchedule = true
+					return p
+				}(),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+			},
+			expected: 1,
+		},
+		{
+			name:  "requiredPool narrows the count to the named pool's vCenter",
+			lease: &v1.Lease{Spec: v1.LeaseSpec{Pools: 1, RequiredPool: "vc1-pool1"}},
+			pools: []*v1.Pool{
+				testPool("vc1-pool1", "vcenter1.example.com"),
+				testPool("vc2-pool1", "vcenter2.example.com"),
+			},
+			expected: 1,
+		},
+		{
+			name:     "empty inventory yields zero",
+			lease:    &v1.Lease{Spec: v1.LeaseSpec{Pools: 1}},
+			pools:    []*v1.Pool{},
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CountDistinctVCenters(tt.lease, tt.pools)
+			if got != tt.expected {
+				t.Errorf("CountDistinctVCenters() = %d, expected %d", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetFittingPoolsWithMinVCenterDiversity(t *testing.T) {
+	lease := &v1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-lease", Namespace: "default"},
+		Spec:       v1.LeaseSpec{VCpus: 16, Memory: 32, Pools: 3, MinVCenters: 2},
+	}
+
+	pools := []*v1.Pool{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "vc1-pool1"},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Server: "vcenter1.example.com",
+					},
+				},
+				VCpus: 100, Memory: 1000,
+			},
+			Status: v1.PoolStatus{VCpusAvailable: 100, MemoryAvailable: 1000},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "vc1-pool2"},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Server: "vcenter1.example.com",
+					},
+				},
+				VCpus: 100, Memory: 1000,
+			},
+			Status: v1.PoolStatus{VCpusAvailable: 100, MemoryAvailable: 1000},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "vc2-pool1"},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Server: "vcenter2.example.com",
+					},
+				},
+				VCpus: 100, Memory: 1000,
+			},
+			Status: v1.PoolStatus{VCpusAvailable: 100, MemoryAvailable: 1000},
+		},
+	}
+
+	t.Run("pools on vCenters in use are rejected with a diversity reason", func(t *testing.T) {
+		diversityVCenters := map[string]bool{"vcenter1.example.com": true}
+
+		fittingPools, results := GetFittingPools(lease, pools, nil, diversityVCenters)
+		if len(fittingPools) != 1 {
+			t.Fatalf("Expected 1 fitting pool, got %d", len(fittingPools))
+		}
+		if fittingPools[0].Spec.Server != "vcenter2.example.com" {
+			t.Errorf("Expected fitting pool from vcenter2.example.com, got %s", fittingPools[0].Spec.Server)
+		}
+
+		rejections := make(map[string]string)
+		for _, result := range results {
+			rejections[result.Pool.Name] = result.MatchResults
+		}
+		for _, poolName := range []string{"vc1-pool1", "vc1-pool2"} {
+			if rejections[poolName] != PoolVCenterDiversityRequired {
+				t.Errorf("Pool %s has reason '%s', expected '%s'", poolName, rejections[poolName], PoolVCenterDiversityRequired)
+			}
+		}
+	})
+
+	t.Run("no diversity exclusions when the map is nil", func(t *testing.T) {
+		fittingPools, _ := GetFittingPools(lease, pools, nil, nil)
+		if len(fittingPools) != 3 {
+			t.Errorf("Expected 3 fitting pools, got %d", len(fittingPools))
+		}
+	})
+}
+
+// TestGetPoolWithStrategyMinVCenterDiversity simulates the reconciler's
+// pool-assignment loop for a lease requesting 3 pools with a minimum of 2
+// vCenters, verifying that successive picks are forced onto a new vCenter
+// until the minimum is met.
+func TestGetPoolWithStrategyMinVCenterDiversity(t *testing.T) {
+	lease := &v1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-lease", Namespace: "default"},
+		Spec:       v1.LeaseSpec{VCpus: 16, Memory: 32, Pools: 3, MinVCenters: 2},
+	}
+
+	pools := []*v1.Pool{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "vc1-pool1"},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Server: "vcenter1.example.com",
+					},
+				},
+				VCpus: 100, Memory: 1000,
+			},
+			Status: v1.PoolStatus{VCpusAvailable: 100, MemoryAvailable: 1000},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "vc1-pool2"},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Server: "vcenter1.example.com",
+					},
+				},
+				VCpus: 100, Memory: 1000,
+			},
+			Status: v1.PoolStatus{VCpusAvailable: 100, MemoryAvailable: 1000},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "vc2-pool1"},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Server: "vcenter2.example.com",
+					},
+				},
+				VCpus: 100, Memory: 1000,
+			},
+			Status: v1.PoolStatus{VCpusAvailable: 100, MemoryAvailable: 1000},
+		},
+	}
+
+	requiredPools := lease.Spec.Pools
+	assignedPools := make([]*v1.Pool, 0, requiredPools)
+
+	for len(assignedPools) < requiredPools {
+		// Mirror the reconciler: exclude vCenters in use while the minimum is pending
+		diversityVCenters := GetDiversityExcludedVCenters(lease, assignedPools)
+
+		pool, err := GetPoolWithStrategy(lease, pools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED, nil, diversityVCenters)
+		if err != nil {
+			t.Fatalf("GetPoolWithStrategy failed on pick %d: %v", len(assignedPools)+1, err)
+		}
+		assignedPools = append(assignedPools, pool)
+	}
+
+	vcentersInUse := GetVCentersInUse(assignedPools)
+	if len(vcentersInUse) < lease.Spec.MinVCenters {
+		t.Errorf("expected at least %d distinct vCenters across assigned pools, got %v",
+			lease.Spec.MinVCenters, vcentersInUse)
+	}
+	if len(assignedPools) != requiredPools {
+		t.Errorf("expected %d assigned pools, got %d", requiredPools, len(assignedPools))
+	}
+	if len(lease.OwnerReferences) != requiredPools {
+		t.Errorf("expected %d pool owner references, got %d", requiredPools, len(lease.OwnerReferences))
+	}
+}
+
+// TestGetPoolWithStrategyMinVCenterDiversityUnavailable verifies that a lease
+// waiting on a new vCenter (to satisfy MinVCenters) gets a descriptive error
+// listing the diversity rejection reason for pools on vCenters already in use.
+func TestGetPoolWithStrategyMinVCenterDiversityUnavailable(t *testing.T) {
+	lease := &v1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-lease", Namespace: "default"},
+		Spec:       v1.LeaseSpec{VCpus: 16, Memory: 32, Pools: 2, MinVCenters: 2},
+	}
+
+	// vcenter2's only pool is out of resources, so the lease can never
+	// diversify onto it right now. vcenter1 has a second, unassigned pool so
+	// that the diversity rejection reason is visible in the error output.
+	pools := []*v1.Pool{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "vc1-pool1"},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Server: "vcenter1.example.com",
+					},
+				},
+				VCpus: 100, Memory: 1000,
+			},
+			Status: v1.PoolStatus{VCpusAvailable: 100, MemoryAvailable: 1000},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "vc1-pool2"},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Server: "vcenter1.example.com",
+					},
+				},
+				VCpus: 100, Memory: 1000,
+			},
+			Status: v1.PoolStatus{VCpusAvailable: 100, MemoryAvailable: 1000},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "vc2-pool1"},
+			Spec: v1.PoolSpec{
+				FailureDomainSpec: v1.FailureDomainSpec{
+					VSpherePlatformFailureDomainSpec: configv1.VSpherePlatformFailureDomainSpec{
+						Server: "vcenter2.example.com",
+					},
+				},
+				VCpus: 100, Memory: 1000,
+			},
+			Status: v1.PoolStatus{VCpusAvailable: 0, MemoryAvailable: 0},
+		},
+	}
+
+	// First pick succeeds (no vCenters in use yet, nothing to diversify from)
+	pool, err := GetPoolWithStrategy(lease, pools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED, nil, GetDiversityExcludedVCenters(lease, nil))
+	if err != nil {
+		t.Fatalf("expected first pick to succeed, got error: %v", err)
+	}
+	if pool.Spec.Server != "vcenter1.example.com" {
+		t.Fatalf("expected first pick from vcenter1.example.com, got %s", pool.Spec.Server)
+	}
+
+	// Second pick must fail: vcenter1 is excluded for diversity and vcenter2
+	// has no resources.
+	assigned := []*v1.Pool{pool}
+	_, err = GetPoolWithStrategy(lease, pools, v1.RESOURCE_ALLOCATION_STRATEGY_UNDERUTILIZED, nil, GetDiversityExcludedVCenters(lease, assigned))
+	if err == nil {
+		t.Fatal("expected second pick to fail while waiting for a new vCenter")
+	}
+	if !strings.Contains(err.Error(), PoolVCenterDiversityRequired) {
+		t.Errorf("expected error to mention %q, got: %v", PoolVCenterDiversityRequired, err)
 	}
 }
