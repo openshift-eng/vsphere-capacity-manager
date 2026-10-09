@@ -3,9 +3,11 @@ package test
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
 	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/controller"
@@ -121,6 +123,25 @@ func (r *lease) WithMinVCenters(minVCenters int) *lease {
 
 func (r *lease) Build() *v1.Lease {
 	return &r.lease
+}
+
+// SetPoolExclusion toggles scheduling exclusion for a pool, retrying on
+// resourceVersion conflicts. The reconcilers concurrently update Pool objects
+// (releasing capacity after a lease is deleted, setting short names and
+// network availability), so a single Get/Update pair can lose the race and
+// fail the test with a 409 conflict.
+func SetPoolExclusion(poolName string, exclude bool) {
+	gomega.Eventually(func() error {
+		pool := &v1.Pool{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{
+			Namespace: "default",
+			Name:      poolName,
+		}, pool); err != nil {
+			return err
+		}
+		pool.Spec.Exclude = exclude
+		return k8sClient.Update(ctx, pool)
+	}, 30*time.Second, 1*time.Second).Should(gomega.Succeed())
 }
 
 // IsLeaseOwnedByKinds IsLeaseOwnedByKind checks if the lease is owned by the declared kinds

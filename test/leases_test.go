@@ -571,7 +571,13 @@ var _ = Describe("Lease management", func() {
 			Expect(lease1).NotTo(BeNil())
 			lease1.Spec.Networks = 2
 
-			lease2 = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-2").WithBoskosID("vsphere-elastic-88").Build()
+			// lease2 deliberately uses a different boskos ID. With a shared ID the
+			// sibling network constraint would force lease2 to match lease1's
+			// randomly shuffled picks, but workload-1 has a few networks that
+			// workload-2 lacks (e.g. ci-vlan-1259), so whenever lease1 happened to
+			// pick one of those, lease2 could never satisfy the constraint and
+			// stayed Partial forever.
+			lease2 = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-2").WithBoskosID("vsphere-elastic-89").Build()
 			Expect(lease2).NotTo(BeNil())
 			lease2.Spec.Networks = 2
 
@@ -579,14 +585,16 @@ var _ = Describe("Lease management", func() {
 			Expect(k8sClient.Create(ctx, lease2)).To(Succeed())
 		})
 
-		// Wait for the start lease to be fulfilled
+		// Wait for the start lease to be fulfilled. The explicit timeout is
+		// more generous than the 10s suite default: on slow CI runners the
+		// manager startup and reconciliation can outlast it.
 		By("waiting for leases to be fulfilled", func() {
 			Eventually(func() bool {
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1)
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease2), lease2)
 
 				return lease1.Status.Phase == v1.PHASE_FULFILLED && lease2.Status.Phase == v1.PHASE_FULFILLED
-			}).Should(BeTrue())
+			}, 60*time.Second, 1*time.Second).Should(BeTrue())
 		})
 
 		// Now delete the leases
@@ -981,7 +989,13 @@ var _ = Describe("Lease management", func() {
 			Expect(lease1).NotTo(BeNil())
 			lease1.Spec.Networks = 2
 
-			lease2 = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-2").WithBoskosID("vsphere-elastic-88").Build()
+			// lease2 deliberately uses a different boskos ID. With a shared ID the
+			// sibling network constraint would force lease2 to match lease1's
+			// randomly shuffled picks, but workload-1 has a few networks that
+			// workload-2 lacks (e.g. ci-vlan-1259), so whenever lease1 happened to
+			// pick one of those, lease2 could never satisfy the constraint and
+			// stayed Partial forever.
+			lease2 = GetLease().WithShape(SHAPE_SMALL).WithPool("test.com-ibmcloud-vcs-mdcnc-workload-2").WithBoskosID("vsphere-elastic-89").Build()
 			Expect(lease2).NotTo(BeNil())
 			lease2.Spec.Networks = 2
 
@@ -989,14 +1003,16 @@ var _ = Describe("Lease management", func() {
 			Expect(k8sClient.Create(ctx, lease2)).To(Succeed())
 		})
 
-		// Wait for the start lease to be fulfilled
+		// Wait for the start lease to be fulfilled. The explicit timeout is
+		// more generous than the 10s suite default: on slow CI runners the
+		// manager startup and reconciliation can outlast it.
 		By("waiting for leases to be fulfilled", func() {
 			Eventually(func() bool {
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease1), lease1)
 				_ = k8sClient.Get(ctx, client.ObjectKeyFromObject(lease2), lease2)
 
 				return lease1.Status.Phase == v1.PHASE_FULFILLED && lease2.Status.Phase == v1.PHASE_FULFILLED
-			}).Should(BeTrue())
+			}, 60*time.Second, 1*time.Second).Should(BeTrue())
 		})
 
 		// Now delete the leases
@@ -1794,13 +1810,7 @@ var _ = Describe("Lease management", func() {
 				"test.com-ibmcloud-vcs-mdcnc-workload-1",
 				"test.com-ibmcloud-vcs-mdcnc-workload-2",
 			} {
-				pool := &v1.Pool{}
-				Expect(k8sClient.Get(ctx, types.NamespacedName{
-					Namespace: "default",
-					Name:      poolName,
-				}, pool)).To(Succeed())
-				pool.Spec.Exclude = false
-				Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+				SetPoolExclusion(poolName, false)
 			}
 		})
 
@@ -1857,7 +1867,7 @@ var _ = Describe("Lease management", func() {
 		By("waiting for lease to be deleted", func() {
 			Eventually(func() bool {
 				return k8sClient.Get(ctx, client.ObjectKeyFromObject(lease), lease) != nil
-			}).Should(BeTrue())
+			}, 60*time.Second, 1*time.Second).Should(BeTrue())
 		})
 
 		By("re-excluding the additional test.com pools", func() {
@@ -1865,13 +1875,7 @@ var _ = Describe("Lease management", func() {
 				"test.com-ibmcloud-vcs-mdcnc-workload-1",
 				"test.com-ibmcloud-vcs-mdcnc-workload-2",
 			} {
-				pool := &v1.Pool{}
-				Expect(k8sClient.Get(ctx, types.NamespacedName{
-					Namespace: "default",
-					Name:      poolName,
-				}, pool)).To(Succeed())
-				pool.Spec.Exclude = true
-				Expect(k8sClient.Update(ctx, pool)).To(Succeed())
+				SetPoolExclusion(poolName, true)
 			}
 		})
 	})
