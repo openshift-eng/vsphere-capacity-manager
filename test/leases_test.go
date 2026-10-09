@@ -562,6 +562,14 @@ var _ = Describe("Lease management", func() {
 	})
 
 	// This test is to verify a fix for issue with private ci jobs that were requesting multi zone with multi
+	// Regression coverage for "sibling leases on pools with asymmetric network sets
+	// livelock in Partial forever": lease1 and lease2 deliberately share a boskos ID
+	// while pinned to different pools (workload-1/workload-2), which have a few
+	// networks that aren't common to both. Before the fix, lease1's random network
+	// pick could land on a workload-1-only network, permanently stranding lease2 (the
+	// sibling network constraint forces it to match exactly). The reconciler now
+	// restricts lease1's pick to networks both pools can supply (see
+	// siblingPoolsForNetworkCommonality), so this is expected to pass deterministically.
 	It("should acquire multiple networks for case with multi zone", func() {
 		var lease1, lease2 *v1.Lease
 
@@ -972,6 +980,14 @@ var _ = Describe("Lease management", func() {
 	})
 
 	// This test is to verify a fix for issue with private ci jobs that were requesting multi zone with multi
+	// Regression coverage for "sibling leases on pools with asymmetric network sets
+	// livelock in Partial forever": lease1 and lease2 deliberately share a boskos ID
+	// while pinned to different pools (workload-1/workload-2), which have a few
+	// networks that aren't common to both. Before the fix, lease1's random network
+	// pick could land on a workload-1-only network, permanently stranding lease2 (the
+	// sibling network constraint forces it to match exactly). The reconciler now
+	// restricts lease1's pick to networks both pools can supply (see
+	// siblingPoolsForNetworkCommonality), so this is expected to pass deterministically.
 	It("should acquire multiple networks for case with multi zone", func() {
 		var lease1, lease2 *v1.Lease
 

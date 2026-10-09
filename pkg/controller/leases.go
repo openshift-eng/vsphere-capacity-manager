@@ -545,6 +545,95 @@ func (l *LeaseReconciler) commonPortGroupNames(pools []*v1.Pool, networkType v1.
 	return common
 }
 
+// siblingPoolsForNetworkCommonality returns the pools that a lease's siblings - other,
+// non-network-only leases carrying the same boskos ID - are already known to use, so this
+// lease's own network picks can be restricted up front to port groups all of them can also
+// supply. A sibling's pool is "known" if it already has a Pool owner reference, or if it
+// declares spec.required-pool; siblings whose pool cannot yet be determined are skipped,
+// since there's nothing meaningful to restrict against until they land somewhere.
+//
+// Without this, the first sibling to reconcile picks networks from its own pool only; the
+// sibling network constraint (see getCommonNetworksForLease/resolveCommonNetworksForPool)
+// then forces every later sibling to match that exact pick. If the first sibling's pool has
+// networks a later sibling's pool lacks, the first pick can strand that later sibling in
+// Partial forever once it happens to land on one.
+//
+// This lists leases via the API (l.List) rather than the package-level leases map: the lease
+// reconciler has a single worker, so an earlier-created sibling is typically reconciled to
+// completion - including picking its own networks - before a later sibling is reconciled even
+// once, and the leases map is only populated as each lease's own reconcile runs. l.List reads
+// from the controller's watch cache, which reflects every lease that exists in the API
+// regardless of whether this controller has reconciled it yet, so a later-created sibling's
+// required pool is visible from the very first reconcile of the earlier one.
+func (l *LeaseReconciler) siblingPoolsForNetworkCommonality(ctx context.Context, lease *v1.Lease) ([]*v1.Pool, error) {
+	if lease.Spec.VCpus == 0 && lease.Spec.Memory == 0 {
+		// Network-only leases are never treated as sibling constraint sources or
+		// targets (see getCommonNetworksForLease), so they don't drive this either.
+		return nil, nil
+	}
+
+	if _, hasBoskosID := lease.Labels[BoskosIdLabel]; !hasBoskosID {
+		return nil, nil
+	}
+
+	siblingLeases := &v1.LeaseList{}
+	if err := l.List(ctx, siblingLeases, client.InNamespace(lease.Namespace)); err != nil {
+		return nil, err
+	}
+
+	return resolveSiblingPools(lease, siblingLeases.Items), nil
+}
+
+// resolveSiblingPools is the matching logic behind siblingPoolsForNetworkCommonality,
+// factored out so it can be unit tested against a plain slice of candidate leases without a
+// client. See siblingPoolsForNetworkCommonality for why candidates must come from a List call
+// rather than the package-level leases map.
+func resolveSiblingPools(lease *v1.Lease, candidates []v1.Lease) []*v1.Pool {
+	leaseID, hasBoskosID := lease.Labels[BoskosIdLabel]
+	if !hasBoskosID {
+		return nil
+	}
+
+	var siblingPools []*v1.Pool
+	seenPoolNames := make(map[string]bool)
+	for i := range candidates {
+		sibling := &candidates[i]
+		if sibling.Name == lease.Name || sibling.DeletionTimestamp != nil {
+			continue
+		}
+		if sibling.Spec.VCpus == 0 && sibling.Spec.Memory == 0 {
+			continue
+		}
+		if siblingID, exists := sibling.Labels[BoskosIdLabel]; !exists || siblingID != leaseID {
+			continue
+		}
+
+		var knownPoolNames []string
+		for _, ownerRef := range sibling.OwnerReferences {
+			if ownerRef.Kind == "Pool" {
+				knownPoolNames = append(knownPoolNames, ownerRef.Name)
+			}
+		}
+		if len(knownPoolNames) == 0 && sibling.Spec.RequiredPool != "" {
+			knownPoolNames = []string{sibling.Spec.RequiredPool}
+		}
+
+		for _, name := range knownPoolNames {
+			if seenPoolNames[name] {
+				continue
+			}
+			for _, pool := range pools {
+				if pool.Name == name {
+					seenPoolNames[name] = true
+					siblingPools = append(siblingPools, pool)
+					break
+				}
+			}
+		}
+	}
+	return siblingPools
+}
+
 // failLeaseIfUnsatisfiable checks whether lease can ever be fulfilled given the full pool
 // inventory. If not, it mutates lease (OwnerReferences + Status) into a terminal Failed
 // state and returns true; the caller is responsible for persisting lease via the client.
@@ -1248,14 +1337,24 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// For multi-pool leases, the network picked for the first pool must also exist in every
 	// other assigned pool, or later pools can end up with no matching network at all (e.g. a
 	// pool in one site has no port group for a VLAN that happens to be common to the other,
-	// same-site pools). Restrict the first pool's candidates to this cross-pool-common set;
-	// an empty result means no network is common to every assigned pool, so none should be
-	// assigned this round rather than locking a VLAN into pools that can't all share it.
+	// same-site pools). The same hazard exists across separate sibling leases sharing a boskos
+	// ID: the sibling network constraint below forces a later sibling to match whatever this
+	// lease picks, so fold in any sibling pool that's already known (owner reference or
+	// required-pool) here too - see siblingPoolsForNetworkCommonality. An empty result means
+	// no network is common to every candidate pool, so none should be assigned this round
+	// rather than locking in a choice some of them can't share.
+	commonalityPools := append([]*v1.Pool{}, assignedPools...)
+	if siblingPools, siblingErr := l.siblingPoolsForNetworkCommonality(ctx, lease); siblingErr != nil {
+		log.Printf("unable to determine sibling pools for lease %s: %v", lease.Name, siblingErr)
+	} else {
+		commonalityPools = append(commonalityPools, siblingPools...)
+	}
+
 	var commonPortGroups map[string]bool
-	if len(assignedPools) > 1 {
-		commonPortGroups = l.commonPortGroupNames(assignedPools, lease.Spec.NetworkType)
+	if len(commonalityPools) > 1 {
+		commonPortGroups = l.commonPortGroupNames(commonalityPools, lease.Spec.NetworkType)
 		if len(commonPortGroups) == 0 {
-			log.Printf("lease %s: no network is available in all %d assigned pools; cannot assign a shared network this round", lease.Name, len(assignedPools))
+			log.Printf("lease %s: no network is available in all %d candidate pools (including sibling leases); cannot assign a shared network this round", lease.Name, len(commonalityPools))
 		}
 	}
 
@@ -1285,11 +1384,16 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			availableNetworks, err = l.getCommonNetworksForLease(lease)
 			if err == nil {
 				// A sibling (same boskos ID) already has a network assigned, so this pool
-				// is constrained to match it. If no network in this pool satisfies that
-				// constraint, we must NOT fall back to picking an unrelated network below —
-				// doing so is exactly how sibling leases end up on mismatched VLANs/port
-				// groups. Leave availableNetworks empty instead; the pool will
-				// be reported as missing networks and retried on the next reconcile.
+				// is constrained to match it exactly. commonPortGroups (computed above from
+				// this lease's own pools plus known sibling pools) must NOT be applied here:
+				// it would reject the very candidates that are correct precisely because the
+				// sibling already claimed them, which makes those port groups "unavailable"
+				// from commonPortGroupNames' point of view. If no network in this pool
+				// satisfies the sibling constraint, we must NOT fall back to picking an
+				// unrelated network below either — doing so is exactly how sibling leases end
+				// up on mismatched VLANs/port groups. Leave availableNetworks empty instead;
+				// the pool will be reported as missing networks and retried on the next
+				// reconcile.
 				availableNetworks = l.resolveCommonNetworksForPool(availableNetworks, currentPool, poolNetworksMap, lease.Spec.NetworkType)
 				if len(availableNetworks) == 0 {
 					log.Printf("pool %s cannot supply a network matching the sibling lease(s) in this job; will not fall back to an unconstrained network", currentPool.Name)
@@ -1304,6 +1408,21 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 					log.Println("Adding single tenant networks to multi-tenant collection...")
 					availableNetworks = append(availableNetworks, l.getAvailableNetworks(currentPool, v1.NetworkTypeSingleTenant)...)
 				}
+
+				// This lease has no sibling network to match yet, so it's free to pick -
+				// restrict that free pick to port groups also available in every other
+				// candidate pool (this lease's own other assigned pools, plus any sibling
+				// pool already known; see commonPortGroups above) so this lease doesn't lock
+				// in a choice one of those pools can never match.
+				if poolIdx == 0 && commonPortGroups != nil {
+					filtered := make([]*v1.Network, 0, len(availableNetworks))
+					for _, n := range availableNetworks {
+						if commonPortGroups[n.Spec.PortGroupName] {
+							filtered = append(filtered, n)
+						}
+					}
+					availableNetworks = filtered
+				}
 			}
 
 			log.Printf("Found %d available networks for pool %s", len(availableNetworks), currentPool.Name)
@@ -1316,18 +1435,6 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			// For the first pool, we assign networks and track their VLANs
 			// For subsequent pools, we try to match VLANs from the first pool
 			if poolIdx == 0 {
-				// First pool: assign any available network, but only one that's also
-				// available in every other assigned pool (see commonPortGroups above) -
-				// otherwise we'd lock in a choice a later pool can never match.
-				if commonPortGroups != nil {
-					filtered := make([]*v1.Network, 0, len(availableNetworks))
-					for _, n := range availableNetworks {
-						if commonPortGroups[n.Spec.PortGroupName] {
-							filtered = append(filtered, n)
-						}
-					}
-					availableNetworks = filtered
-				}
 				for idx := 0; poolNetworkCount < networksPerPool && idx < len(availableNetworks); idx++ {
 					network := availableNetworks[idx]
 					if !doesLeaseContainPortGroup(lease, currentPool, network) {
