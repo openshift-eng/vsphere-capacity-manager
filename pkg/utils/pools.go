@@ -11,14 +11,15 @@ import (
 )
 
 const (
-	PoolNotSchedulable      = "Pool not schedulable"
-	PoolExcluded            = "Pool marked as excluded"
-	PoolNotMatchRequired    = "Pool does not match required"
-	PoolInsufficientVCPU    = "Insufficient VCPU"
-	PoolInsufficientMemory  = "Insufficient memory"
-	PoolLabelMismatch       = "Pool labels do not match poolSelector"
-	PoolTaintNotTolerated   = "Pool has taints not tolerated by lease"
-	PoolVCenterLimitReached = "Pool vCenter limit reached"
+	PoolNotSchedulable           = "Pool not schedulable"
+	PoolExcluded                 = "Pool marked as excluded"
+	PoolNotMatchRequired         = "Pool does not match required"
+	PoolInsufficientVCPU         = "Insufficient VCPU"
+	PoolInsufficientMemory       = "Insufficient memory"
+	PoolLabelMismatch            = "Pool labels do not match poolSelector"
+	PoolTaintNotTolerated        = "Pool has taints not tolerated by lease"
+	PoolVCenterLimitReached      = "Pool vCenter limit reached"
+	PoolVCenterDiversityRequired = "Pool vCenter diversity required"
 )
 
 type PoolFittingInfo struct {
@@ -105,6 +106,24 @@ func GetVCentersInUse(assignedPools []*v1.Pool) map[string]bool {
 	return vcenters
 }
 
+// GetDiversityExcludedVCenters returns the set of vCenter Server FQDNs that pool
+// selection must avoid while the lease's MinVCenters requirement is not yet met:
+// the vCenters already in use by the lease's assigned pools. Forcing selection
+// onto a new vCenter guarantees the lease cannot fill all of its pool slots from
+// fewer vCenters than required. The returned map is non-nil (but possibly empty)
+// whenever diversification is still required — including when no pools have been
+// assigned yet — and nil once MinVCenters is unset or already satisfied.
+func GetDiversityExcludedVCenters(lease *v1.Lease, assignedPools []*v1.Pool) map[string]bool {
+	if lease.Spec.MinVCenters <= 0 {
+		return nil
+	}
+	vcentersInUse := GetVCentersInUse(assignedPools)
+	if len(vcentersInUse) >= lease.Spec.MinVCenters {
+		return nil
+	}
+	return vcentersInUse
+}
+
 // poolMatchesStructural reports whether a pool structurally matches a lease's requirements,
 // ignoring transient state such as current resource availability, current ownership, and
 // any vCenter exclusions computed for a particular reconcile pass. It captures only the
@@ -131,12 +150,9 @@ func poolMatchesStructural(lease *v1.Lease, pool *v1.Pool) bool {
 	return true
 }
 
-// MaxAchievablePools returns the maximum number of pools a lease could ever be assigned,
-// given the full known pool inventory and the lease's structural constraints (RequiredPool,
-// PoolSelector, Tolerations, NoSchedule/Exclude) and its VCenters cap. It deliberately
-// ignores current resource availability and existing ownership, since those are transient:
-// this answers "can this request ever be satisfied," not "can it be satisfied right now."
-func MaxAchievablePools(lease *v1.Lease, allPools []*v1.Pool) int {
+// structuralPoolsPerVCenter groups the pools that structurally match the lease
+// by vCenter Server FQDN and returns the per-vCenter counts.
+func structuralPoolsPerVCenter(lease *v1.Lease, allPools []*v1.Pool) map[string]int {
 	poolsPerVCenter := make(map[string]int)
 	for _, pool := range allPools {
 		if !poolMatchesStructural(lease, pool) {
@@ -144,6 +160,25 @@ func MaxAchievablePools(lease *v1.Lease, allPools []*v1.Pool) int {
 		}
 		poolsPerVCenter[pool.Spec.Server]++
 	}
+	return poolsPerVCenter
+}
+
+// CountDistinctVCenters returns the number of distinct vCenter Server FQDNs that
+// have at least one pool structurally matching the lease. Like
+// MaxAchievablePools, it ignores transient state such as current resource
+// availability and existing ownership: it answers "how many vCenters could ever
+// participate in fulfilling this lease," not "how many are available right now."
+func CountDistinctVCenters(lease *v1.Lease, allPools []*v1.Pool) int {
+	return len(structuralPoolsPerVCenter(lease, allPools))
+}
+
+// MaxAchievablePools returns the maximum number of pools a lease could ever be assigned,
+// given the full known pool inventory and the lease's structural constraints (RequiredPool,
+// PoolSelector, Tolerations, NoSchedule/Exclude) and its VCenters cap. It deliberately
+// ignores current resource availability and existing ownership, since those are transient:
+// this answers "can this request ever be satisfied," not "can it be satisfied right now."
+func MaxAchievablePools(lease *v1.Lease, allPools []*v1.Pool) int {
+	poolsPerVCenter := structuralPoolsPerVCenter(lease, allPools)
 
 	if lease.Spec.VCenters <= 0 {
 		total := 0
@@ -172,12 +207,16 @@ func MaxAchievablePools(lease *v1.Lease, allPools []*v1.Pool) int {
 
 // IsLeaseSatisfiable reports whether a lease's request could ever be fulfilled given the
 // full known pool inventory. It returns false with an explanatory reason when the lease's
-// Pools/VCenters requirements structurally exceed what the known inventory can ever provide,
-// regardless of current utilization by other leases.
+// Pools/VCenters/MinVCenters requirements structurally exceed what the known inventory can
+// ever provide, regardless of current utilization by other leases.
 func IsLeaseSatisfiable(lease *v1.Lease, allPools []*v1.Pool) (bool, string) {
 	requiredPools := lease.Spec.Pools
 	if requiredPools == 0 {
 		requiredPools = 1
+	}
+
+	if reason, ok := minVCentersUnsatisfiableReason(lease, requiredPools, allPools); ok {
+		return false, reason
 	}
 
 	maxAchievable := MaxAchievablePools(lease, allPools)
@@ -193,6 +232,44 @@ func IsLeaseSatisfiable(lease *v1.Lease, allPools []*v1.Pool) (bool, string) {
 		"lease requires %d pool(s) (vcenters cap %d) but at most %d are structurally achievable given the known pool inventory",
 		requiredPools, lease.Spec.VCenters, maxAchievable,
 	)
+}
+
+// minVCentersUnsatisfiableReason returns a specific, actionable reason when a lease's
+// MinVCenters requirement can never be satisfied: when it exceeds the number of requested
+// pools (each pool resides on exactly one vCenter), when it exceeds the VCenters cap, or
+// when the known inventory does not contain enough distinct vCenters with structurally
+// matching pools. It returns ("", false) when MinVCenters is unset or can be satisfied.
+//
+// The first two conditions are also enforced at admission time by the CEL validation
+// rules on the Lease CRD (see the XValidation markers on LeaseSpec). These checks
+// remain as defense in depth for objects that predate those rules and for clusters
+// where CRD validation rules are not evaluated (Kubernetes < 1.25).
+func minVCentersUnsatisfiableReason(lease *v1.Lease, requiredPools int, allPools []*v1.Pool) (string, bool) {
+	minVCenters := lease.Spec.MinVCenters
+	if minVCenters <= 0 {
+		return "", false
+	}
+
+	if minVCenters > requiredPools {
+		return fmt.Sprintf(
+			"lease requires a minimum of %d vcenters but only requests %d pool(s): each pool resides on exactly one vCenter",
+			minVCenters, requiredPools), true
+	}
+
+	if lease.Spec.VCenters > 0 && minVCenters > lease.Spec.VCenters {
+		return fmt.Sprintf(
+			"lease minimum vcenters (%d) exceeds its maximum vcenters cap (%d)",
+			minVCenters, lease.Spec.VCenters), true
+	}
+
+	distinctVCenters := CountDistinctVCenters(lease, allPools)
+	if distinctVCenters < minVCenters {
+		return fmt.Sprintf(
+			"lease requires at least %d distinct vcenters but only %d vcenter(s) have structurally matching pools",
+			minVCenters, distinctVCenters), true
+	}
+
+	return "", false
 }
 
 // requiredPoolUnsatisfiableReason returns a specific, actionable reason when a lease's
@@ -224,7 +301,10 @@ func requiredPoolUnsatisfiableReason(lease *v1.Lease, allPools []*v1.Pool) (stri
 // The list is sorted by the sum of the resource usage of the pool. The pool with the least resource usage is first.
 // excludedVCenters is an optional set of vCenter Server FQDNs to exclude from consideration (used to enforce
 // the lease's VCenters cap). Pass nil or an empty map for no vcenter constraint.
-func GetFittingPools(lease *v1.Lease, pools []*v1.Pool, excludedVCenters map[string]bool) ([]*v1.Pool, []*PoolFittingInfo) {
+// diversityVCenters is an optional set of vCenter Server FQDNs in use by the lease that must be avoided while
+// the lease's MinVCenters requirement is not yet met (used to force assignment onto new vCenters). Pass nil or
+// an empty map when no diversification is required.
+func GetFittingPools(lease *v1.Lease, pools []*v1.Pool, excludedVCenters map[string]bool, diversityVCenters map[string]bool) ([]*v1.Pool, []*PoolFittingInfo) {
 	var fittingPools []*v1.Pool
 	poolResults := []*PoolFittingInfo{}
 
@@ -271,6 +351,12 @@ func GetFittingPools(lease *v1.Lease, pools []*v1.Pool, excludedVCenters map[str
 		// to ensure more specific rejection reasons are reported first
 		if len(excludedVCenters) > 0 && excludedVCenters[pool.Spec.Server] {
 			poolResults = append(poolResults, &PoolFittingInfo{Pool: pool, MatchResults: PoolVCenterLimitReached})
+			continue
+		}
+		// If minimum vCenter diversity is pending, skip pools on vCenters already in
+		// use by this lease so that selection is forced onto a new vCenter
+		if len(diversityVCenters) > 0 && diversityVCenters[pool.Spec.Server] {
+			poolResults = append(poolResults, &PoolFittingInfo{Pool: pool, MatchResults: PoolVCenterDiversityRequired})
 			continue
 		}
 		if int(pool.Status.VCpusAvailable) >= lease.Spec.VCpus &&
@@ -320,8 +406,11 @@ func generatePoolResults(results []*PoolFittingInfo) []string {
 // GetPoolWithStrategy returns a pool that has enough resources to satisfy the lease requirements.
 // excludedVCenters is an optional set of vCenter Server FQDNs to exclude (enforces the VCenters cap).
 // Pass nil for no vcenter constraint.
-func GetPoolWithStrategy(lease *v1.Lease, pools []*v1.Pool, strategy v1.AllocationStrategy, excludedVCenters map[string]bool) (*v1.Pool, error) {
-	fittingPools, results := GetFittingPools(lease, pools, excludedVCenters)
+// diversityVCenters is an optional set of vCenter Server FQDNs in use by the lease that must be
+// avoided while the lease's MinVCenters requirement is not yet met. Pass nil when no
+// diversification is required.
+func GetPoolWithStrategy(lease *v1.Lease, pools []*v1.Pool, strategy v1.AllocationStrategy, excludedVCenters map[string]bool, diversityVCenters map[string]bool) (*v1.Pool, error) {
+	fittingPools, results := GetFittingPools(lease, pools, excludedVCenters, diversityVCenters)
 
 	if len(fittingPools) == 0 {
 		return nil, fmt.Errorf("no pools available. %v", generatePoolResults(results))

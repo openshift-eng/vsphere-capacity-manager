@@ -1,0 +1,36 @@
+apiVersion: vspherecapacitymanager.splat.io/v1
+kind: Lease
+metadata:
+  name: example-multi-vcenter-lease
+  labels:
+    job-name: example-job
+    boskos-lease-id: example-lease-123
+spec:
+  # Request 3 pools for this lease
+  pools: 3
+
+  # Require the assigned pools to span at least 2 distinct vCenters.
+  # While fewer than 2 vCenters are in use, pool selection is restricted to
+  # vCenters not already in use, so the lease cannot be fulfilled from a
+  # single vCenter.
+  min-vcenters: 2
+
+  # Resource requirements per pool
+  vcpus: 28
+  memory: 112
+
+  # Network requirements
+  networks: 1
+  network-type: single-tenant
+
+  # Optional: also cap the maximum number of distinct vCenters.
+  # Must be >= min-vcenters when set. Uncomment to draw the 3 pools from
+  # between 2 and 2 (exactly 2) distinct vCenters:
+  # vcenters: 2
+
+  # Optional: Uncomment to require a specific pool
+  # required-pool: test.com-ibmcloud-vcs-ci-workload
+
+  # Optional: Uncomment to use pool selector
+  # poolSelector:
+  #   region: us-east

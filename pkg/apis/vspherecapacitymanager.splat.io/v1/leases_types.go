@@ -70,6 +70,11 @@ type Lease struct {
 }
 
 // LeaseSpec defines the specification for a lease
+//
+// The XValidation rules below address the min-vcenters property as
+// min__dash__vcenters: CEL must escape the dash in kebab-case property names.
+// +kubebuilder:validation:XValidation:rule="!has(self.min__dash__vcenters) || self.min__dash__vcenters <= self.pools",message="min-vcenters must not exceed pools: each pool resides on exactly one vCenter"
+// +kubebuilder:validation:XValidation:rule="!has(self.min__dash__vcenters) || !has(self.vcenters) || self.vcenters == 0 || self.min__dash__vcenters <= self.vcenters",message="min-vcenters must not exceed the vcenters cap"
 type LeaseSpec struct {
 	// VCpus is the number of virtual CPUs allocated for this lease
 	VCpus int `json:"vcpus,omitempty"`
@@ -85,9 +90,25 @@ type LeaseSpec struct {
 	// This acts as a cap on vcenter diversity across all assigned pools.
 	// For example, a lease with pools: 4 and vcenters: 3 will assign 4 pools but
 	// draw them from at most 3 distinct vCenters.
+	// See MinVCenters for requiring a minimum number of distinct vCenters instead.
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	VCenters int `json:"vcenters,omitempty"`
+	// MinVCenters is the minimum number of distinct vCenters (identified by Server
+	// FQDN) required across the pools assigned to this lease. When 0 or unset, no
+	// minimum is applied.
+	// While the lease's assigned pools span fewer vCenters than this minimum, pool
+	// selection is restricted to vCenters not already in use, so the lease cannot
+	// be fulfilled from fewer vCenters than required.
+	// For example, a lease with pools: 3 and min-vcenters: 2 will be assigned 3
+	// pools drawn from at least 2 distinct vCenters.
+	// The value must not exceed spec.pools, and when spec.vcenters is set it must
+	// not exceed that cap either; the API server rejects leases that violate
+	// either rule at admission time (see the XValidation rules on LeaseSpec), and
+	// the controller fails any that predate those rules as unschedulable.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MinVCenters int `json:"min-vcenters,omitempty"`
 	// Storage is the amount of storage in GB allocated for this lease
 	// +optional
 	Storage int `json:"storage,omitempty"`
