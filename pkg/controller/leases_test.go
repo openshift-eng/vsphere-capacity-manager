@@ -24,6 +24,12 @@ func setupTestLeases(ls map[string]*v1.Lease) func() {
 	return func() { leases = old }
 }
 
+func setupTestPools(ps map[string]*v1.Pool) func() {
+	old := pools
+	pools = ps
+	return func() { pools = old }
+}
+
 func TestDoesLeaseContainPortGroup(t *testing.T) {
 	dc := "dc1"
 	pod := "pod1"
@@ -611,6 +617,138 @@ func TestCommonPortGroupNames(t *testing.T) {
 	if len(got) != 1 {
 		t.Errorf("expected exactly 1 common port group, got %v", got)
 	}
+}
+
+// TestResolveSiblingPools covers resolveSiblingPools, the matching logic behind
+// siblingPoolsForNetworkCommonality. That function is a fix for a livelock where the first of
+// two sibling leases (same boskos ID) to reconcile could pick networks available only in its
+// own pool, permanently stranding a sibling pinned to a pool lacking those networks ("sibling
+// leases on pools with asymmetric network sets livelock in Partial forever").
+func TestResolveSiblingPools(t *testing.T) {
+	poolA := &v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "pool-a"}}
+	poolB := &v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "pool-b"}}
+	poolC := &v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "pool-c"}}
+
+	cleanupPools := setupTestPools(map[string]*v1.Pool{
+		poolA.Name: poolA,
+		poolB.Name: poolB,
+		poolC.Name: poolC,
+	})
+	defer cleanupPools()
+
+	selfLease := &v1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "self-lease",
+			Labels: map[string]string{BoskosIdLabel: "job-1"},
+		},
+		Spec: v1.LeaseSpec{VCpus: 8, Memory: 32, RequiredPool: "pool-a"},
+	}
+
+	siblingByRequiredPool := v1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "sibling-required-pool",
+			Labels: map[string]string{BoskosIdLabel: "job-1"},
+		},
+		Spec: v1.LeaseSpec{VCpus: 8, Memory: 32, RequiredPool: "pool-b"},
+	}
+
+	// Simulates a pool-selector-based sibling: no required-pool, but the reconciler has
+	// already assigned it a pool, recorded as an owner reference.
+	siblingByOwnerRef := v1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "sibling-owner-ref",
+			Labels:          map[string]string{BoskosIdLabel: "job-1"},
+			OwnerReferences: []metav1.OwnerReference{{Kind: "Pool", Name: "pool-c"}},
+		},
+		Spec: v1.LeaseSpec{VCpus: 8, Memory: 32},
+	}
+
+	differentJob := v1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "different-job",
+			Labels: map[string]string{BoskosIdLabel: "job-2"},
+		},
+		Spec: v1.LeaseSpec{VCpus: 8, Memory: 32, RequiredPool: "pool-b"},
+	}
+
+	// A network-only lease (no VCpus/Memory) is never a sibling constraint source or
+	// target - see getCommonNetworksForLease - so it must not drive this either.
+	networkOnlySibling := v1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "network-only-sibling",
+			Labels: map[string]string{BoskosIdLabel: "job-1"},
+		},
+		Spec: v1.LeaseSpec{RequiredPool: "pool-b"},
+	}
+
+	deletingSibling := v1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "deleting-sibling",
+			Labels:            map[string]string{BoskosIdLabel: "job-1"},
+			DeletionTimestamp: &metav1.Time{},
+		},
+		Spec: v1.LeaseSpec{VCpus: 8, Memory: 32, RequiredPool: "pool-b"},
+	}
+
+	assertPools := func(t *testing.T, got []*v1.Pool, want ...string) {
+		t.Helper()
+		gotNames := make([]string, len(got))
+		for i, p := range got {
+			gotNames[i] = p.Name
+		}
+		sort.Strings(gotNames)
+		sort.Strings(want)
+		if fmt.Sprint(gotNames) != fmt.Sprint(want) {
+			t.Errorf("expected pools %v, got %v", want, gotNames)
+		}
+	}
+
+	t.Run("finds a sibling's pool via required-pool", func(t *testing.T) {
+		got := resolveSiblingPools(selfLease, []v1.Lease{siblingByRequiredPool})
+		assertPools(t, got, "pool-b")
+	})
+
+	t.Run("finds a sibling's pool via an existing owner reference", func(t *testing.T) {
+		got := resolveSiblingPools(selfLease, []v1.Lease{siblingByOwnerRef})
+		assertPools(t, got, "pool-c")
+	})
+
+	t.Run("ignores leases with a different boskos ID", func(t *testing.T) {
+		got := resolveSiblingPools(selfLease, []v1.Lease{differentJob})
+		assertPools(t, got)
+	})
+
+	t.Run("ignores network-only siblings", func(t *testing.T) {
+		got := resolveSiblingPools(selfLease, []v1.Lease{networkOnlySibling})
+		assertPools(t, got)
+	})
+
+	t.Run("ignores siblings that are being deleted", func(t *testing.T) {
+		got := resolveSiblingPools(selfLease, []v1.Lease{deletingSibling})
+		assertPools(t, got)
+	})
+
+	t.Run("does not treat the lease itself as its own sibling", func(t *testing.T) {
+		got := resolveSiblingPools(selfLease, []v1.Lease{*selfLease})
+		assertPools(t, got)
+	})
+
+	t.Run("returns nothing when the lease itself has no boskos ID", func(t *testing.T) {
+		noBoskosID := &v1.Lease{
+			ObjectMeta: metav1.ObjectMeta{Name: "no-boskos-id"},
+			Spec:       v1.LeaseSpec{VCpus: 8, Memory: 32, RequiredPool: "pool-a"},
+		}
+		got := resolveSiblingPools(noBoskosID, []v1.Lease{siblingByRequiredPool})
+		assertPools(t, got)
+	})
+
+	t.Run("deduplicates pools shared by multiple siblings", func(t *testing.T) {
+		otherSiblingSamePool := siblingByRequiredPool
+		otherSiblingSamePool.Name = "sibling-required-pool-2"
+
+		got := resolveSiblingPools(selfLease, []v1.Lease{siblingByRequiredPool, otherSiblingSamePool})
+		assertPools(t, got, "pool-b")
+	})
 }
 
 func TestGetNetworkType(t *testing.T) {
