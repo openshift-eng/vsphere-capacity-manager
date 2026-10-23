@@ -869,13 +869,15 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, fmt.Errorf("error dropping finalizers from lease: %w", err)
 		}
 
-		if ownRef := utils.DoesLeaseHavePool(lease); ownRef != nil {
-			promLabels["pool"] = ownRef.Name
-		}
+		poolRefs := utils.GetLeasePoolRefs(lease)
 
 		delete(leases, leaseKey)
-		if len(promLabels) >= 2 {
-			LeasesInUse.With(promLabels).Dec()
+		for _, ownRef := range poolRefs {
+			decLabels := prometheus.Labels{
+				"namespace": promLabels["namespace"],
+				"pool":      ownRef.Name,
+			}
+			LeasesInUse.With(decLabels).Dec()
 		}
 		reconcilePoolStates()
 		l.triggerPoolUpdates(ctx)
@@ -1710,8 +1712,13 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	if lease.Status.Phase == v1.PHASE_FULFILLED {
-		promLabels["pool"] = pool.Name
-		LeasesInUse.With(promLabels).Add(1)
+		for _, assignedPool := range assignedPools {
+			incLabels := prometheus.Labels{
+				"namespace": promLabels["namespace"],
+				"pool":      assignedPool.Name,
+			}
+			LeasesInUse.With(incLabels).Add(1)
+		}
 
 		if pool.Annotations == nil {
 			pool.Annotations = make(map[string]string)

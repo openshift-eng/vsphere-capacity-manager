@@ -39,17 +39,6 @@ func init() {
 	}
 }
 
-// DoesLeaseHavePool returns true if a lease already has an associated pool
-func DoesLeaseHavePool(lease *v1.Lease) *metav1.OwnerReference {
-	var ref *metav1.OwnerReference
-	for _, ownerRef := range lease.OwnerReferences {
-		if ownerRef.Kind == "Pool" {
-			ref = &ownerRef
-		}
-	}
-	return ref
-}
-
 // GetLeasePoolRefs returns all pool owner references for a lease
 func GetLeasePoolRefs(lease *v1.Lease) []metav1.OwnerReference {
 	var poolRefs []metav1.OwnerReference
