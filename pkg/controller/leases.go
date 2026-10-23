@@ -193,35 +193,64 @@ func reconcilePoolStates() []*v1.Pool {
 
 	networksInUse := make(map[string]map[string]string)
 
+	// Precompute each lease's per-pool vCPU/memory share once, instead of
+	// recomputing it (and reallocating GetLeasePoolRefs' slice) for every
+	// (pool, lease) pair in the loop below. If a lease somehow owns more pools
+	// than it currently declares needing (e.g. Spec.Pools was lowered after
+	// assignment), split across the actual owned count rather than clamping
+	// every pool beyond Spec.Pools to the last share, which would otherwise
+	// double-charge those pools against the lease's total.
+	type poolShare struct {
+		vcpus  int
+		memory int
+	}
+	leasePoolShares := make(map[*v1.Lease]map[string]poolShare, len(leases))
+	for _, lease := range leases {
+		poolRefs := utils.GetLeasePoolRefs(lease)
+		if len(poolRefs) == 0 {
+			continue
+		}
+		n := utils.LeaseRequiredPools(lease)
+		if len(poolRefs) > n {
+			n = len(poolRefs)
+		}
+		vcpuShares := utils.SplitResourceAcrossPools(lease.Spec.VCpus, n)
+		memoryShares := utils.SplitResourceAcrossPools(lease.Spec.Memory, n)
+
+		shares := make(map[string]poolShare, len(poolRefs))
+		for i, ref := range poolRefs {
+			shares[ref.Name] = poolShare{vcpus: vcpuShares[i], memory: memoryShares[i]}
+		}
+		leasePoolShares[lease] = shares
+	}
+
 	for poolName, pool := range pools {
 		vcpus := 0
 		memory := 0
 		leaseCount := 0
 
 		for _, lease := range leases {
-			for poolIdx, ownerRef := range utils.GetLeasePoolRefs(lease) {
-				if ownerRef.Name == pool.Name {
-					vcpuShare, memoryShare := utils.LeasePoolShare(lease, poolIdx)
-					vcpus += vcpuShare
-					memory += memoryShare
-					leaseCount++
+			share, ok := leasePoolShares[lease][pool.Name]
+			if !ok {
+				continue
+			}
+			vcpus += share.vcpus
+			memory += share.memory
+			leaseCount++
 
-					var serverNetworks map[string]string
-					var exists bool
+			var serverNetworks map[string]string
+			var exists bool
 
-					dc, pod := getIBMDatacenterAndPod(lease.Status.Server)
-					dcId := fmt.Sprintf("dcid-%s-%s", dc, pod)
-					if serverNetworks, exists = networksInUse[dcId]; !exists {
-						serverNetworks = make(map[string]string)
-						networksInUse[dcId] = serverNetworks
-					}
+			dc, pod := getIBMDatacenterAndPod(lease.Status.Server)
+			dcId := fmt.Sprintf("dcid-%s-%s", dc, pod)
+			if serverNetworks, exists = networksInUse[dcId]; !exists {
+				serverNetworks = make(map[string]string)
+				networksInUse[dcId] = serverNetworks
+			}
 
-					for _, networkPath := range lease.Status.Topology.Networks {
-						_, networkName := path.Split(networkPath)
-						serverNetworks[networkName] = networkName
-					}
-					break
-				}
+			for _, networkPath := range lease.Status.Topology.Networks {
+				_, networkName := path.Split(networkPath)
+				serverNetworks[networkName] = networkName
 			}
 		}
 
@@ -344,6 +373,28 @@ func (l *LeaseReconciler) triggerLeaseUpdates(ctx context.Context, networkType v
 		if err != nil {
 			log.Printf("error updating lease %s annotations: %v", oldestLease.Name, err)
 		}
+	}
+}
+
+// incrementLeasesInUse adds 1 to the leases_in_use gauge for each pool a
+// freshly-fulfilled lease is assigned to.
+func incrementLeasesInUse(namespace string, assignedPools []*v1.Pool) {
+	for _, pool := range assignedPools {
+		LeasesInUse.With(prometheus.Labels{
+			"namespace": namespace,
+			"pool":      pool.Name,
+		}).Add(1)
+	}
+}
+
+// decrementLeasesInUse subtracts 1 from the leases_in_use gauge for each pool
+// a deleted, previously-fulfilled lease was assigned to.
+func decrementLeasesInUse(namespace string, poolRefs []metav1.OwnerReference) {
+	for _, ref := range poolRefs {
+		LeasesInUse.With(prometheus.Labels{
+			"namespace": namespace,
+			"pool":      ref.Name,
+		}).Dec()
 	}
 }
 
@@ -870,16 +921,15 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, fmt.Errorf("error dropping finalizers from lease: %w", err)
 		}
 
-		poolRefs := utils.GetLeasePoolRefs(lease)
+		// Only a lease that actually reached Fulfilled (and so was Added below) has
+		// anything to subtract here. A lease that owns pool refs but is still
+		// Pending/Partial was never Added, and decrementing it anyway would push the
+		// gauge negative until the next pool reconcile's absolute Set() corrects it.
+		if lease.Status.Phase == v1.PHASE_FULFILLED {
+			decrementLeasesInUse(promLabels["namespace"], utils.GetLeasePoolRefs(lease))
+		}
 
 		delete(leases, leaseKey)
-		for _, ownRef := range poolRefs {
-			decLabels := prometheus.Labels{
-				"namespace": promLabels["namespace"],
-				"pool":      ownRef.Name,
-			}
-			LeasesInUse.With(decLabels).Dec()
-		}
 		reconcilePoolStates()
 		l.triggerPoolUpdates(ctx)
 		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
@@ -1713,13 +1763,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	if lease.Status.Phase == v1.PHASE_FULFILLED {
-		for _, assignedPool := range assignedPools {
-			incLabels := prometheus.Labels{
-				"namespace": promLabels["namespace"],
-				"pool":      assignedPool.Name,
-			}
-			LeasesInUse.With(incLabels).Add(1)
-		}
+		incrementLeasesInUse(promLabels["namespace"], assignedPools)
 
 		if pool.Annotations == nil {
 			pool.Annotations = make(map[string]string)

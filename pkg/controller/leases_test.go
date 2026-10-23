@@ -1154,6 +1154,76 @@ func TestReconcilePoolStatesSplitsResourcesAcrossMultiplePools(t *testing.T) {
 	}
 }
 
+// TestReconcilePoolStatesMoreOwnedPoolsThanSpecPools covers a lease that owns
+// more pools (via OwnerReferences) than its current Spec.Pools declares - e.g.
+// Spec.Pools was lowered after pools were already assigned. The split must use
+// the actual owned pool count as the denominator, not clamp every pool beyond
+// Spec.Pools to the last pool's share, which would otherwise charge the
+// lease's total more than once.
+func TestReconcilePoolStatesMoreOwnedPoolsThanSpecPools(t *testing.T) {
+	defer setupTestNetworks(map[string]*v1.Network{})()
+	defer setupTestPools(map[string]*v1.Pool{
+		"default/pool1": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool1", Namespace: "default"},
+			Spec:       v1.PoolSpec{VCpus: 100, Memory: 200, OverCommitRatio: "1.0"},
+		},
+		"default/pool2": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool2", Namespace: "default"},
+			Spec:       v1.PoolSpec{VCpus: 100, Memory: 200, OverCommitRatio: "1.0"},
+		},
+		"default/pool3": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool3", Namespace: "default"},
+			Spec:       v1.PoolSpec{VCpus: 100, Memory: 200, OverCommitRatio: "1.0"},
+		},
+	})()
+	defer setupTestLeases(map[string]*v1.Lease{
+		"default/lease1": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "lease1",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Pool", Name: "pool1"},
+					{Kind: "Pool", Name: "pool2"},
+					{Kind: "Pool", Name: "pool3"},
+				},
+			},
+			// Declares 2 pools but actually owns 3 (e.g. Spec.Pools was lowered after
+			// the 3rd pool was already assigned).
+			Spec: v1.LeaseSpec{Pools: 2, VCpus: 20, Memory: 40},
+		},
+	})()
+
+	outList := reconcilePoolStates()
+	if len(outList) != 3 {
+		t.Fatalf("expected 3 pools, got %d", len(outList))
+	}
+
+	byName := make(map[string]*v1.Pool, len(outList))
+	for _, pool := range outList {
+		byName[pool.Name] = pool
+	}
+
+	totalVCpusUsed := 0
+	totalMemoryUsed := 0
+	for _, name := range []string{"pool1", "pool2", "pool3"} {
+		p := byName[name]
+		totalVCpusUsed += p.Spec.VCpus - p.Status.VCpusAvailable
+		totalMemoryUsed += p.Spec.Memory - p.Status.MemoryAvailable
+	}
+
+	// Split across the actual 3 owned pools, not Spec.Pools=2: must still sum to
+	// exactly the lease's total (20/40), not 2x or 3x that from double-charging.
+	if totalVCpusUsed != 20 {
+		t.Errorf("total vCPUs deducted across pools = %d, want 20", totalVCpusUsed)
+	}
+	if totalMemoryUsed != 40 {
+		t.Errorf("total memory deducted across pools = %d, want 40", totalMemoryUsed)
+	}
+}
+
 func TestUpdateLeaseMetrics(t *testing.T) {
 	oldLeases := leases
 	oldPools := pools
@@ -1197,6 +1267,49 @@ func TestUpdateLeaseMetrics(t *testing.T) {
 	age := testutil.ToFloat64(LeaseAgeSeconds.WithLabelValues("default", "test-lease", "pool1", "multi-tenant"))
 	if age < 0 || age > 5 {
 		t.Errorf("expected lease age near 0 seconds, got %v", age)
+	}
+}
+
+// TestLeasesInUseMetricSymmetryAcrossMultiplePools is a regression test for the
+// multi-pool leases_in_use mis-attribution bug: fulfilling a lease spanning N
+// pools must Add(1) to every pool it owns, and deleting it must later Dec()
+// that exact same set - not just the first pool (as fulfillment once did) or
+// the last one found (as deletion once did). Exercises the same
+// incrementLeasesInUse/decrementLeasesInUse helpers the real Reconcile fulfill
+// and delete paths call, so a label mismatch between them would be caught here.
+func TestLeasesInUseMetricSymmetryAcrossMultiplePools(t *testing.T) {
+	const namespace = "leases-in-use-symmetry-test"
+	pool1 := &v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "liu-pool-1", Namespace: namespace}}
+	pool2 := &v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "liu-pool-2", Namespace: namespace}}
+	assignedPools := []*v1.Pool{pool1, pool2}
+
+	before1 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool1.Name))
+	before2 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool2.Name))
+
+	incrementLeasesInUse(namespace, assignedPools)
+
+	after1 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool1.Name))
+	after2 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool2.Name))
+	if after1 != before1+1 {
+		t.Errorf("pool1 leases_in_use after fulfill = %v, want %v", after1, before1+1)
+	}
+	if after2 != before2+1 {
+		t.Errorf("pool2 leases_in_use after fulfill = %v, want %v", after2, before2+1)
+	}
+
+	poolRefs := []metav1.OwnerReference{
+		{Kind: "Pool", Name: pool1.Name},
+		{Kind: "Pool", Name: pool2.Name},
+	}
+	decrementLeasesInUse(namespace, poolRefs)
+
+	final1 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool1.Name))
+	final2 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool2.Name))
+	if final1 != before1 {
+		t.Errorf("pool1 leases_in_use after delete = %v, want %v (back to baseline)", final1, before1)
+	}
+	if final2 != before2 {
+		t.Errorf("pool2 leases_in_use after delete = %v, want %v (back to baseline)", final2, before2)
 	}
 }
 
