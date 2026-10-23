@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
+	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/utils"
 )
 
 func setupTestNetworks(nets map[string]*v1.Network) func() {
@@ -2244,25 +2245,15 @@ func TestLeaseVCenterPoolAvailability(t *testing.T) {
 					t.Skip("Test case is for pre-assignment filtering")
 				} else if lease.Spec.VCenters > 0 && lease.Spec.VCenters < tt.requiredPools && len(assignedPools) == 0 {
 					// This is the special case we're testing: VCenters < Pools
-					// Use the same algorithm as production code
+					// Reuse the real production filtering (utils.GetFittingPools) instead of a
+					// hand-rolled duplicate, so this test tracks capacity-matching changes (e.g.
+					// per-pool resource splitting for multi-pool leases) automatically.
+					fittingPools, _ := utils.GetFittingPools(lease, tt.availablePools, nil, nil)
 					fittingPoolsPerVCenter := make(map[string][]*v1.Pool)
-					for _, p := range tt.availablePools {
-						if p.Spec.Server == "" {
-							continue
+					for _, p := range fittingPools {
+						if p.Spec.Server != "" {
+							fittingPoolsPerVCenter[p.Spec.Server] = append(fittingPoolsPerVCenter[p.Spec.Server], p)
 						}
-						if p.Spec.NoSchedule {
-							continue
-						}
-						if p.Spec.Exclude && lease.Spec.RequiredPool != p.ObjectMeta.Name {
-							continue
-						}
-						if len(lease.Spec.RequiredPool) > 0 && lease.Spec.RequiredPool != p.ObjectMeta.Name {
-							continue
-						}
-						if int(p.Status.VCpusAvailable) < lease.Spec.VCpus || int(p.Status.MemoryAvailable) < lease.Spec.Memory {
-							continue
-						}
-						fittingPoolsPerVCenter[p.Spec.Server] = append(fittingPoolsPerVCenter[p.Spec.Server], p)
 					}
 
 					// Build sorted list of vCenters by pool count (descending)

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
+	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/utils"
 	configv1 "github.com/openshift/api/config/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -148,19 +149,23 @@ func TestVCenterCapStuckScenario(t *testing.T) {
 		},
 	}
 
-	// The lease that got stuck: 4 pools, max 3 vcenters, 24 vCPU / 96 GB each
+	// The lease that got stuck: 4 pools, max 3 vcenters, 24 vCPU / 96 GB each.
+	// Spec.VCpus/Spec.Memory are the lease's TOTAL request, split evenly across
+	// Spec.Pools pools (see utils.LeasePoolShare), so to need 24 vCPU / 96 GB from
+	// each of the 4 pools the lease must request 4x that as its total: 96/384.
 	lease := &v1.Lease{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vsphere-elastic-77-zcnsv",
 			Namespace: "vsphere-infra-helpers",
 		},
 		Spec: v1.LeaseSpec{
-			VCpus:    24,
-			Memory:   96,
+			VCpus:    96,
+			Memory:   384,
 			Pools:    4,
 			VCenters: 3,
 		},
 	}
+	vcpuShare, memoryShare := utils.LeaseNextPoolShare(lease) // 24, 96
 
 	t.Run("initial selection with dynamic filtering", func(t *testing.T) {
 		// Test that initial pre-filtering works correctly
@@ -169,9 +174,9 @@ func TestVCenterCapStuckScenario(t *testing.T) {
 		// Count pools per vCenter (simulate GetFittingPools)
 		poolsPerVCenter := make(map[string]int)
 		for _, p := range pools {
-			// Check if pool has enough resources
-			if int(p.Status.VCpusAvailable) >= lease.Spec.VCpus &&
-				int(p.Status.MemoryAvailable) >= lease.Spec.Memory {
+			// Check if pool has enough resources for its per-pool share (24 vCPU / 96 GB)
+			if int(p.Status.VCpusAvailable) >= vcpuShare &&
+				int(p.Status.MemoryAvailable) >= memoryShare {
 				poolsPerVCenter[p.Spec.Server]++
 			}
 		}
@@ -320,7 +325,7 @@ func TestVCenterCapStuckScenario(t *testing.T) {
 
 		t.Logf("Modified pools to simulate stuck scenario:")
 		for _, p := range modifiedPools {
-			canFit := int(p.Status.VCpusAvailable) >= 24 && int(p.Status.MemoryAvailable) >= 96
+			canFit := int(p.Status.VCpusAvailable) >= vcpuShare && int(p.Status.MemoryAvailable) >= memoryShare
 			t.Logf("  %s: %d vCPU, %d GB → can fit: %v",
 				p.Spec.Server, p.Status.VCpusAvailable, p.Status.MemoryAvailable, canFit)
 		}
