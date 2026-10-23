@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"testing"
+	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -1224,6 +1225,57 @@ func TestReconcilePoolStatesMoreOwnedPoolsThanSpecPools(t *testing.T) {
 	}
 }
 
+// TestReconcilePoolStatesHugeSpecPoolsDoesNotAllocateProportionally is a
+// regression test for a DoS: Spec.Pools has no upper bound (the CRD only
+// validates Minimum=1), so a lease that already owns a pool but has had
+// Spec.Pools edited to an enormous value must not make reconcilePoolStates
+// allocate, or take time, proportional to Spec.Pools.
+func TestReconcilePoolStatesHugeSpecPoolsDoesNotAllocateProportionally(t *testing.T) {
+	defer setupTestNetworks(map[string]*v1.Network{})()
+	defer setupTestPools(map[string]*v1.Pool{
+		"default/pool1": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool1", Namespace: "default"},
+			Spec:       v1.PoolSpec{VCpus: 100, Memory: 200, OverCommitRatio: "1.0"},
+		},
+	})()
+	defer setupTestLeases(map[string]*v1.Lease{
+		"default/lease1": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "lease1",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Pool", Name: "pool1"},
+				},
+			},
+			// Spec.Pools was edited to an enormous value after this lease already
+			// owned pool1. Must not allocate ~Spec.Pools-sized slices for this.
+			Spec: v1.LeaseSpec{Pools: 2_000_000_000, VCpus: 96, Memory: 384},
+		},
+	})()
+
+	done := make(chan []*v1.Pool, 1)
+	go func() { done <- reconcilePoolStates() }()
+
+	select {
+	case outList := <-done:
+		if len(outList) != 1 {
+			t.Fatalf("expected 1 pool, got %d", len(outList))
+		}
+		pool1 := outList[0]
+		// pool1 is index 0 of 2,000,000,000 shares of 96/384: gets the +1
+		// remainder (96 and 384 are both < 2e9), so 1 vCPU / 1 GB is deducted.
+		if pool1.Status.VCpusAvailable != 99 {
+			t.Errorf("pool1 VCpusAvailable = %d, want 99 (100 - 1)", pool1.Status.VCpusAvailable)
+		}
+		if pool1.Status.MemoryAvailable != 199 {
+			t.Errorf("pool1 MemoryAvailable = %d, want 199 (200 - 1)", pool1.Status.MemoryAvailable)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reconcilePoolStates did not return within 2s - likely allocating or looping proportional to Spec.Pools")
+	}
+}
+
 func TestUpdateLeaseMetrics(t *testing.T) {
 	oldLeases := leases
 	oldPools := pools
@@ -1270,46 +1322,91 @@ func TestUpdateLeaseMetrics(t *testing.T) {
 	}
 }
 
-// TestLeasesInUseMetricSymmetryAcrossMultiplePools is a regression test for the
+// TestIncrementLeasesInUseOnFulfillment is a regression test for the
 // multi-pool leases_in_use mis-attribution bug: fulfilling a lease spanning N
-// pools must Add(1) to every pool it owns, and deleting it must later Dec()
-// that exact same set - not just the first pool (as fulfillment once did) or
-// the last one found (as deletion once did). Exercises the same
-// incrementLeasesInUse/decrementLeasesInUse helpers the real Reconcile fulfill
-// and delete paths call, so a label mismatch between them would be caught here.
-func TestLeasesInUseMetricSymmetryAcrossMultiplePools(t *testing.T) {
-	const namespace = "leases-in-use-symmetry-test"
-	pool1 := &v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "liu-pool-1", Namespace: namespace}}
-	pool2 := &v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "liu-pool-2", Namespace: namespace}}
-	assignedPools := []*v1.Pool{pool1, pool2}
+// pools must Add(1) to every pool it owns, not just the first (as it once
+// did).
+func TestIncrementLeasesInUseOnFulfillment(t *testing.T) {
+	const namespace = "leases-in-use-increment-test"
+	pool1 := &v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "liu-inc-pool-1", Namespace: namespace}}
+	pool2 := &v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "liu-inc-pool-2", Namespace: namespace}}
 
 	before1 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool1.Name))
 	before2 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool2.Name))
 
-	incrementLeasesInUse(namespace, assignedPools)
+	incrementLeasesInUse(namespace, []*v1.Pool{pool1, pool2})
 
-	after1 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool1.Name))
-	after2 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool2.Name))
-	if after1 != before1+1 {
-		t.Errorf("pool1 leases_in_use after fulfill = %v, want %v", after1, before1+1)
+	if got := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool1.Name)); got != before1+1 {
+		t.Errorf("pool1 leases_in_use after fulfill = %v, want %v", got, before1+1)
 	}
-	if after2 != before2+1 {
-		t.Errorf("pool2 leases_in_use after fulfill = %v, want %v", after2, before2+1)
+	if got := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool2.Name)); got != before2+1 {
+		t.Errorf("pool2 leases_in_use after fulfill = %v, want %v", got, before2+1)
+	}
+}
+
+// TestSetLeasesInUseFromPoolCountsAfterLeaseDeletion is a regression test for
+// a staleness bug: a PARTIAL lease (pool refs assigned, but never
+// incrementLeasesInUse'd - that only runs on the Fulfilled transition) still
+// contributes to a pool's Status.LeaseCount via reconcilePoolStates. Deleting
+// it must immediately correct the leases_in_use gauge via
+// setLeasesInUseFromPoolCounts, not leave it stale-high until some unrelated
+// lease event happens to trigger that pool's own async reconcile. Also covers
+// a multi-pool lease, where both owned pools must independently converge to 0
+// - not just the first or last pool reference.
+func TestSetLeasesInUseFromPoolCountsAfterLeaseDeletion(t *testing.T) {
+	const namespace = "default"
+	defer setupTestNetworks(map[string]*v1.Network{})()
+	defer setupTestPools(map[string]*v1.Pool{
+		"default/liu-del-pool-1": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "liu-del-pool-1", Namespace: namespace},
+			Spec:       v1.PoolSpec{VCpus: 100, Memory: 200, OverCommitRatio: "1.0"},
+		},
+		"default/liu-del-pool-2": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "liu-del-pool-2", Namespace: namespace},
+			Spec:       v1.PoolSpec{VCpus: 100, Memory: 200, OverCommitRatio: "1.0"},
+		},
+	})()
+
+	leasesMap := map[string]*v1.Lease{
+		"default/liu-del-lease": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "liu-del-lease",
+				Namespace: namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Pool", Name: "liu-del-pool-1"},
+					{Kind: "Pool", Name: "liu-del-pool-2"},
+				},
+			},
+			Spec: v1.LeaseSpec{Pools: 2, VCpus: 10, Memory: 20},
+			// PARTIAL, not Fulfilled: never went through incrementLeasesInUse.
+			Status: v1.LeaseStatus{Phase: v1.PHASE_PARTIAL},
+		},
+	}
+	defer setupTestLeases(leasesMap)()
+
+	// reconcilePoolStates counts this PARTIAL lease toward LeaseCount regardless
+	// of phase; setting from that makes it visible on both pools even though it
+	// was never Add()'d.
+	setLeasesInUseFromPoolCounts(reconcilePoolStates())
+	if got := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, "liu-del-pool-1")); got != 1 {
+		t.Fatalf("liu-del-pool-1 leases_in_use with partial lease assigned = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, "liu-del-pool-2")); got != 1 {
+		t.Fatalf("liu-del-pool-2 leases_in_use with partial lease assigned = %v, want 1", got)
 	}
 
-	poolRefs := []metav1.OwnerReference{
-		{Kind: "Pool", Name: pool1.Name},
-		{Kind: "Pool", Name: pool2.Name},
-	}
-	decrementLeasesInUse(namespace, poolRefs)
+	// Delete it (mirrors LeaseReconciler.Reconcile's deletion branch) and
+	// recompute: both pools must drop back to 0 immediately, not just one.
+	delete(leasesMap, "default/liu-del-lease")
+	setLeasesInUseFromPoolCounts(reconcilePoolStates())
 
-	final1 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool1.Name))
-	final2 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool2.Name))
-	if final1 != before1 {
-		t.Errorf("pool1 leases_in_use after delete = %v, want %v (back to baseline)", final1, before1)
+	if got := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, "liu-del-pool-1")); got != 0 {
+		t.Errorf("liu-del-pool-1 leases_in_use after delete = %v, want 0", got)
 	}
-	if final2 != before2 {
-		t.Errorf("pool2 leases_in_use after delete = %v, want %v (back to baseline)", final2, before2)
+	if got := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, "liu-del-pool-2")); got != 0 {
+		t.Errorf("liu-del-pool-2 leases_in_use after delete = %v, want 0", got)
 	}
 }
 

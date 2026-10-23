@@ -58,21 +58,42 @@ func LeaseRequiredPools(lease *v1.Lease) int {
 	return lease.Spec.Pools
 }
 
+// ShareAt returns the share of total at the given 0-based index when total is
+// split as evenly as possible across n parts, without allocating an n-length
+// slice. Any remainder from an uneven split goes to the earliest indices.
+// Equivalent to SplitResourceAcrossPools(total, n)[index] for 0 <= index < n,
+// but safe to call with an arbitrarily large n (e.g. a user-controlled
+// Spec.Pools with no upper bound) since it does O(1) work regardless of n.
+func ShareAt(total, n, index int) int {
+	if n <= 0 {
+		return 0
+	}
+	if index >= n {
+		index = n - 1
+	}
+	if index < 0 {
+		index = 0
+	}
+	base := total / n
+	remainder := total % n
+	if index < remainder {
+		return base + 1
+	}
+	return base
+}
+
 // SplitResourceAcrossPools divides total as evenly as possible across n pools,
 // returning an n-length slice whose values sum to total. Any remainder from an
-// uneven split is given, one unit at a time, to the earliest pools in the slice.
+// uneven split is given, one unit at a time, to the earliest pools in the
+// slice. n is expected to be small (e.g. a lease's actual assigned pool
+// count); for a single share, prefer the allocation-free ShareAt.
 func SplitResourceAcrossPools(total, n int) []int {
 	if n <= 0 {
 		return nil
 	}
 	shares := make([]int, n)
-	base := total / n
-	remainder := total % n
-	for i := 0; i < n; i++ {
-		shares[i] = base
-		if i < remainder {
-			shares[i]++
-		}
+	for i := range shares {
+		shares[i] = ShareAt(total, n, i)
 	}
 	return shares
 }
@@ -80,18 +101,12 @@ func SplitResourceAcrossPools(total, n int) []int {
 // LeasePoolShare returns the vCPU and memory this lease requires from the pool
 // at the given 0-based assignment index, out of lease.Spec.Pools pools total.
 // Spec.VCpus and Spec.Memory are split evenly across the assigned pools; any
-// remainder from an uneven split goes to the earliest-assigned pools.
+// remainder from an uneven split goes to the earliest-assigned pools. Safe to
+// call regardless of how large Spec.Pools is, since it never allocates a
+// Spec.Pools-sized slice.
 func LeasePoolShare(lease *v1.Lease, poolIndex int) (vcpus int, memory int) {
 	n := LeaseRequiredPools(lease)
-	if poolIndex >= n {
-		poolIndex = n - 1
-	}
-	if poolIndex < 0 {
-		poolIndex = 0
-	}
-	vcpuShares := SplitResourceAcrossPools(lease.Spec.VCpus, n)
-	memShares := SplitResourceAcrossPools(lease.Spec.Memory, n)
-	return vcpuShares[poolIndex], memShares[poolIndex]
+	return ShareAt(lease.Spec.VCpus, n, poolIndex), ShareAt(lease.Spec.Memory, n, poolIndex)
 }
 
 // LeaseNextPoolShare returns the vCPU and memory share required from the next

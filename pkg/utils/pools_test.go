@@ -995,6 +995,55 @@ func TestSplitResourceAcrossPools(t *testing.T) {
 	}
 }
 
+func TestShareAt(t *testing.T) {
+	tests := []struct {
+		name  string
+		total int
+		n     int
+		want  []int
+	}{
+		{name: "even split", total: 20, n: 2, want: []int{10, 10}},
+		{name: "uneven split gives remainder to earliest pools", total: 21, n: 2, want: []int{11, 10}},
+		{name: "remainder smaller than n", total: 10, n: 3, want: []int{4, 3, 3}},
+		{name: "single pool gets the full total", total: 24, n: 1, want: []int{24}},
+		{name: "zero total splits to zero shares", total: 0, n: 3, want: []int{0, 0, 0}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for i, want := range tt.want {
+				if got := ShareAt(tt.total, tt.n, i); got != want {
+					t.Errorf("ShareAt(%d, %d, %d) = %d, want %d", tt.total, tt.n, i, got, want)
+				}
+			}
+		})
+	}
+
+	if got := ShareAt(10, 0, 0); got != 0 {
+		t.Errorf("ShareAt(10, 0, 0) = %d, want 0", got)
+	}
+
+	// An index at or beyond n clamps to the last share, same as SplitResourceAcrossPools(total, n)[n-1].
+	if got := ShareAt(21, 2, 5); got != 10 {
+		t.Errorf("ShareAt(21, 2, 5) = %d, want 10 (clamped to last share)", got)
+	}
+	if got := ShareAt(21, 2, -1); got != 11 {
+		t.Errorf("ShareAt(21, 2, -1) = %d, want 11 (clamped to first share)", got)
+	}
+
+	// Regression for a DoS where a user-controlled, unbounded Spec.Pools (n)
+	// drove an O(n) allocation (SplitResourceAcrossPools materializing an
+	// n-length slice) that could OOM the controller. ShareAt must stay O(1)
+	// regardless of how large n is - this call must return quickly without
+	// allocating anything proportional to n.
+	const hugeN = 2_000_000_000
+	if got := ShareAt(96, hugeN, 0); got != 1 {
+		t.Errorf("ShareAt(96, %d, 0) = %d, want 1 (96%% %d != 0, so index 0 gets the +1 remainder)", hugeN, got, hugeN)
+	}
+	if got := ShareAt(96, hugeN, 1000); got != 0 {
+		t.Errorf("ShareAt(96, %d, 1000) = %d, want 0", hugeN, got)
+	}
+}
+
 func TestLeasePoolShare(t *testing.T) {
 	lease := &v1.Lease{Spec: v1.LeaseSpec{Pools: 3, VCpus: 10, Memory: 20}}
 

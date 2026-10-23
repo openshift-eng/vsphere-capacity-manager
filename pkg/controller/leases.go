@@ -199,7 +199,10 @@ func reconcilePoolStates() []*v1.Pool {
 	// than it currently declares needing (e.g. Spec.Pools was lowered after
 	// assignment), split across the actual owned count rather than clamping
 	// every pool beyond Spec.Pools to the last share, which would otherwise
-	// double-charge those pools against the lease's total.
+	// double-charge those pools against the lease's total. Uses utils.ShareAt
+	// (O(1) per pool) rather than materializing a Spec.Pools-sized slice:
+	// Spec.Pools has no upper bound, so a lease edited to request an enormous
+	// pool count must not make this allocate proportionally to it.
 	type poolShare struct {
 		vcpus  int
 		memory int
@@ -214,12 +217,13 @@ func reconcilePoolStates() []*v1.Pool {
 		if len(poolRefs) > n {
 			n = len(poolRefs)
 		}
-		vcpuShares := utils.SplitResourceAcrossPools(lease.Spec.VCpus, n)
-		memoryShares := utils.SplitResourceAcrossPools(lease.Spec.Memory, n)
 
 		shares := make(map[string]poolShare, len(poolRefs))
 		for i, ref := range poolRefs {
-			shares[ref.Name] = poolShare{vcpus: vcpuShares[i], memory: memoryShares[i]}
+			shares[ref.Name] = poolShare{
+				vcpus:  utils.ShareAt(lease.Spec.VCpus, n, i),
+				memory: utils.ShareAt(lease.Spec.Memory, n, i),
+			}
 		}
 		leasePoolShares[lease] = shares
 	}
@@ -387,14 +391,19 @@ func incrementLeasesInUse(namespace string, assignedPools []*v1.Pool) {
 	}
 }
 
-// decrementLeasesInUse subtracts 1 from the leases_in_use gauge for each pool
-// a deleted, previously-fulfilled lease was assigned to.
-func decrementLeasesInUse(namespace string, poolRefs []metav1.OwnerReference) {
-	for _, ref := range poolRefs {
+// setLeasesInUseFromPoolCounts sets the leases_in_use gauge for every given
+// pool to its freshly-recomputed Status.LeaseCount, the same authoritative
+// value PoolReconciler.Reconcile eventually converges each pool to. Used
+// instead of a relative Dec() on lease deletion, since LeaseCount already
+// reflects PARTIAL leases (counted by reconcilePoolStates) as well as
+// Fulfilled ones, and an absolute Set() is correct regardless of whatever the
+// gauge's prior value was.
+func setLeasesInUseFromPoolCounts(pools []*v1.Pool) {
+	for _, pool := range pools {
 		LeasesInUse.With(prometheus.Labels{
-			"namespace": namespace,
-			"pool":      ref.Name,
-		}).Dec()
+			"namespace": pool.Namespace,
+			"pool":      pool.Name,
+		}).Set(float64(pool.Status.LeaseCount))
 	}
 }
 
@@ -921,16 +930,16 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, fmt.Errorf("error dropping finalizers from lease: %w", err)
 		}
 
-		// Only a lease that actually reached Fulfilled (and so was Added below) has
-		// anything to subtract here. A lease that owns pool refs but is still
-		// Pending/Partial was never Added, and decrementing it anyway would push the
-		// gauge negative until the next pool reconcile's absolute Set() corrects it.
-		if lease.Status.Phase == v1.PHASE_FULFILLED {
-			decrementLeasesInUse(promLabels["namespace"], utils.GetLeasePoolRefs(lease))
-		}
-
 		delete(leases, leaseKey)
-		reconcilePoolStates()
+
+		// reconcilePoolStates recomputes LeaseCount from the leases map, which no
+		// longer includes this one; set the gauge from that authoritative count
+		// immediately rather than guessing a relative adjustment. A PARTIAL lease
+		// (pool refs assigned, but never incrementLeasesInUse'd - that only runs on
+		// the Fulfilled transition) still contributes to LeaseCount, so deleting one
+		// needs exactly this to avoid leaving the gauge stale-high until some other
+		// lease's event happens to trigger this pool's own async reconcile.
+		setLeasesInUseFromPoolCounts(reconcilePoolStates())
 		l.triggerPoolUpdates(ctx)
 		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
 		updateLeaseMetrics()
