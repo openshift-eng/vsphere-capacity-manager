@@ -199,10 +199,11 @@ func reconcilePoolStates() []*v1.Pool {
 		leaseCount := 0
 
 		for _, lease := range leases {
-			for _, ownerRef := range lease.OwnerReferences {
-				if ownerRef.Kind == pool.Kind && ownerRef.Name == pool.Name {
-					vcpus += lease.Spec.VCpus
-					memory += lease.Spec.Memory
+			for poolIdx, ownerRef := range utils.GetLeasePoolRefs(lease) {
+				if ownerRef.Name == pool.Name {
+					vcpuShare, memoryShare := utils.LeasePoolShare(lease, poolIdx)
+					vcpus += vcpuShare
+					memory += memoryShare
 					leaseCount++
 
 					var serverNetworks map[string]string

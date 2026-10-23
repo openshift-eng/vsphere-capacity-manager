@@ -50,6 +50,56 @@ func GetLeasePoolRefs(lease *v1.Lease) []metav1.OwnerReference {
 	return poolRefs
 }
 
+// LeaseRequiredPools returns the number of pools a lease requires, defaulting to 1.
+func LeaseRequiredPools(lease *v1.Lease) int {
+	if lease.Spec.Pools < 1 {
+		return 1
+	}
+	return lease.Spec.Pools
+}
+
+// SplitResourceAcrossPools divides total as evenly as possible across n pools,
+// returning an n-length slice whose values sum to total. Any remainder from an
+// uneven split is given, one unit at a time, to the earliest pools in the slice.
+func SplitResourceAcrossPools(total, n int) []int {
+	if n <= 0 {
+		return nil
+	}
+	shares := make([]int, n)
+	base := total / n
+	remainder := total % n
+	for i := 0; i < n; i++ {
+		shares[i] = base
+		if i < remainder {
+			shares[i]++
+		}
+	}
+	return shares
+}
+
+// LeasePoolShare returns the vCPU and memory this lease requires from the pool
+// at the given 0-based assignment index, out of lease.Spec.Pools pools total.
+// Spec.VCpus and Spec.Memory are split evenly across the assigned pools; any
+// remainder from an uneven split goes to the earliest-assigned pools.
+func LeasePoolShare(lease *v1.Lease, poolIndex int) (vcpus int, memory int) {
+	n := LeaseRequiredPools(lease)
+	if poolIndex >= n {
+		poolIndex = n - 1
+	}
+	if poolIndex < 0 {
+		poolIndex = 0
+	}
+	vcpuShares := SplitResourceAcrossPools(lease.Spec.VCpus, n)
+	memShares := SplitResourceAcrossPools(lease.Spec.Memory, n)
+	return vcpuShares[poolIndex], memShares[poolIndex]
+}
+
+// LeaseNextPoolShare returns the vCPU and memory share required from the next
+// pool about to be assigned to lease, based on how many pools it already owns.
+func LeaseNextPoolShare(lease *v1.Lease) (vcpus int, memory int) {
+	return LeasePoolShare(lease, len(GetLeasePoolRefs(lease)))
+}
+
 // DoesLeaseHaveAllPools checks if a lease has all required pools assigned
 func DoesLeaseHaveAllPools(lease *v1.Lease) bool {
 	requiredPools := lease.Spec.Pools

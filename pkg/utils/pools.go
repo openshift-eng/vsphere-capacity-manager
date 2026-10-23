@@ -308,6 +308,11 @@ func GetFittingPools(lease *v1.Lease, pools []*v1.Pool, excludedVCenters map[str
 	var fittingPools []*v1.Pool
 	poolResults := []*PoolFittingInfo{}
 
+	// Spec.VCpus and Spec.Memory are the lease's total requirement, split evenly
+	// across Spec.Pools pools. The next pool assigned to this lease must satisfy
+	// its share, not the lease's full total.
+	vcpuShare, memoryShare := LeaseNextPoolShare(lease)
+
 	for _, pool := range pools {
 		// Check if this pool is already owned by the lease
 		alreadyOwned := false
@@ -359,14 +364,14 @@ func GetFittingPools(lease *v1.Lease, pools []*v1.Pool, excludedVCenters map[str
 			poolResults = append(poolResults, &PoolFittingInfo{Pool: pool, MatchResults: PoolVCenterDiversityRequired})
 			continue
 		}
-		if int(pool.Status.VCpusAvailable) >= lease.Spec.VCpus &&
-			int(pool.Status.MemoryAvailable) >= lease.Spec.Memory {
+		if int(pool.Status.VCpusAvailable) >= vcpuShare &&
+			int(pool.Status.MemoryAvailable) >= memoryShare {
 			fittingPools = append(fittingPools, pool)
 		} else {
 			var reason string
-			if pool.Status.VCpusAvailable < lease.Spec.VCpus {
+			if pool.Status.VCpusAvailable < vcpuShare {
 				reason = PoolInsufficientVCPU
-			} else if pool.Status.MemoryAvailable < lease.Spec.Memory {
+			} else if pool.Status.MemoryAvailable < memoryShare {
 				reason = PoolInsufficientMemory
 			} else {
 				reason = fmt.Sprintf("[%v, %v]", PoolInsufficientVCPU, PoolInsufficientMemory)

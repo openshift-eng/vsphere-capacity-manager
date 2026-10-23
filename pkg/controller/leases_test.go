@@ -1075,6 +1075,84 @@ func TestReconcilePoolStatesNetworkTypeSplit(t *testing.T) {
 	}
 }
 
+func TestReconcilePoolStatesSplitsResourcesAcrossMultiplePools(t *testing.T) {
+	defer setupTestNetworks(map[string]*v1.Network{})()
+	defer setupTestPools(map[string]*v1.Pool{
+		"default/pool1": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool1", Namespace: "default"},
+			Spec: v1.PoolSpec{
+				VCpus:           100,
+				Memory:          200,
+				OverCommitRatio: "1.0",
+			},
+		},
+		"default/pool2": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool2", Namespace: "default"},
+			Spec: v1.PoolSpec{
+				VCpus:           100,
+				Memory:          200,
+				OverCommitRatio: "1.0",
+			},
+		},
+	})()
+	defer setupTestLeases(map[string]*v1.Lease{
+		"default/lease1": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "lease1",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Pool", Name: "pool1"},
+					{Kind: "Pool", Name: "pool2"},
+				},
+			},
+			// 21/2 and 41/2 split unevenly: pool1 (assigned first) gets the remainder.
+			Spec: v1.LeaseSpec{Pools: 2, VCpus: 21, Memory: 41},
+		},
+	})()
+
+	outList := reconcilePoolStates()
+	if len(outList) != 2 {
+		t.Fatalf("expected 2 pools, got %d", len(outList))
+	}
+
+	byName := make(map[string]*v1.Pool, len(outList))
+	for _, pool := range outList {
+		byName[pool.Name] = pool
+	}
+
+	pool1, pool2 := byName["pool1"], byName["pool2"]
+
+	if pool1.Status.VCpusAvailable != 89 {
+		t.Errorf("pool1 VCpusAvailable = %d, want 89 (100 - 11)", pool1.Status.VCpusAvailable)
+	}
+	if pool1.Status.MemoryAvailable != 179 {
+		t.Errorf("pool1 MemoryAvailable = %d, want 179 (200 - 21)", pool1.Status.MemoryAvailable)
+	}
+	if pool2.Status.VCpusAvailable != 90 {
+		t.Errorf("pool2 VCpusAvailable = %d, want 90 (100 - 10)", pool2.Status.VCpusAvailable)
+	}
+	if pool2.Status.MemoryAvailable != 180 {
+		t.Errorf("pool2 MemoryAvailable = %d, want 180 (200 - 20)", pool2.Status.MemoryAvailable)
+	}
+
+	// The two pools' deductions must sum to the lease's total request, not be
+	// charged in full against each pool independently.
+	totalVCpusUsed := (pool1.Spec.VCpus - pool1.Status.VCpusAvailable) + (pool2.Spec.VCpus - pool2.Status.VCpusAvailable)
+	if totalVCpusUsed != 21 {
+		t.Errorf("total vCPUs deducted across pools = %d, want 21", totalVCpusUsed)
+	}
+	totalMemoryUsed := (pool1.Spec.Memory - pool1.Status.MemoryAvailable) + (pool2.Spec.Memory - pool2.Status.MemoryAvailable)
+	if totalMemoryUsed != 41 {
+		t.Errorf("total memory deducted across pools = %d, want 41", totalMemoryUsed)
+	}
+
+	if pool1.Status.LeaseCount != 1 || pool2.Status.LeaseCount != 1 {
+		t.Errorf("expected LeaseCount = 1 on both pools, got pool1=%d pool2=%d", pool1.Status.LeaseCount, pool2.Status.LeaseCount)
+	}
+}
+
 func TestUpdateLeaseMetrics(t *testing.T) {
 	oldLeases := leases
 	oldPools := pools
