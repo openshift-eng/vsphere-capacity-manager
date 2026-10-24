@@ -958,6 +958,183 @@ func TestGetFittingPools(t *testing.T) {
 	}
 }
 
+func TestSplitResourceAcrossPools(t *testing.T) {
+	tests := []struct {
+		name  string
+		total int
+		n     int
+		want  []int
+	}{
+		{name: "even split", total: 20, n: 2, want: []int{10, 10}},
+		{name: "uneven split gives remainder to earliest pools", total: 21, n: 2, want: []int{11, 10}},
+		{name: "remainder smaller than n", total: 10, n: 3, want: []int{4, 3, 3}},
+		{name: "single pool gets the full total", total: 24, n: 1, want: []int{24}},
+		{name: "zero total splits to zero shares", total: 0, n: 3, want: []int{0, 0, 0}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SplitResourceAcrossPools(tt.total, tt.n)
+			if len(got) != len(tt.want) {
+				t.Fatalf("SplitResourceAcrossPools(%d, %d) = %v, want %v", tt.total, tt.n, got, tt.want)
+			}
+			sum := 0
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("SplitResourceAcrossPools(%d, %d)[%d] = %d, want %d", tt.total, tt.n, i, got[i], tt.want[i])
+				}
+				sum += got[i]
+			}
+			if sum != tt.total {
+				t.Errorf("SplitResourceAcrossPools(%d, %d) sums to %d, want %d", tt.total, tt.n, sum, tt.total)
+			}
+		})
+	}
+
+	if got := SplitResourceAcrossPools(10, 0); got != nil {
+		t.Errorf("SplitResourceAcrossPools(10, 0) = %v, want nil", got)
+	}
+}
+
+func TestShareAt(t *testing.T) {
+	tests := []struct {
+		name  string
+		total int
+		n     int
+		want  []int
+	}{
+		{name: "even split", total: 20, n: 2, want: []int{10, 10}},
+		{name: "uneven split gives remainder to earliest pools", total: 21, n: 2, want: []int{11, 10}},
+		{name: "remainder smaller than n", total: 10, n: 3, want: []int{4, 3, 3}},
+		{name: "single pool gets the full total", total: 24, n: 1, want: []int{24}},
+		{name: "zero total splits to zero shares", total: 0, n: 3, want: []int{0, 0, 0}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for i, want := range tt.want {
+				if got := ShareAt(tt.total, tt.n, i); got != want {
+					t.Errorf("ShareAt(%d, %d, %d) = %d, want %d", tt.total, tt.n, i, got, want)
+				}
+			}
+		})
+	}
+
+	if got := ShareAt(10, 0, 0); got != 0 {
+		t.Errorf("ShareAt(10, 0, 0) = %d, want 0", got)
+	}
+
+	// An index at or beyond n clamps to the last share, same as SplitResourceAcrossPools(total, n)[n-1].
+	if got := ShareAt(21, 2, 5); got != 10 {
+		t.Errorf("ShareAt(21, 2, 5) = %d, want 10 (clamped to last share)", got)
+	}
+	if got := ShareAt(21, 2, -1); got != 11 {
+		t.Errorf("ShareAt(21, 2, -1) = %d, want 11 (clamped to first share)", got)
+	}
+
+	// Regression for a DoS where a user-controlled, unbounded Spec.Pools (n)
+	// drove an O(n) allocation (SplitResourceAcrossPools materializing an
+	// n-length slice) that could OOM the controller. ShareAt must stay O(1)
+	// regardless of how large n is - this call must return quickly without
+	// allocating anything proportional to n.
+	const hugeN = 2_000_000_000
+	if got := ShareAt(96, hugeN, 0); got != 1 {
+		t.Errorf("ShareAt(96, %d, 0) = %d, want 1 (96%% %d != 0, so index 0 gets the +1 remainder)", hugeN, got, hugeN)
+	}
+	if got := ShareAt(96, hugeN, 1000); got != 0 {
+		t.Errorf("ShareAt(96, %d, 1000) = %d, want 0", hugeN, got)
+	}
+}
+
+func TestLeasePoolShare(t *testing.T) {
+	lease := &v1.Lease{Spec: v1.LeaseSpec{Pools: 3, VCpus: 10, Memory: 20}}
+
+	wantVCpus := []int{4, 3, 3}
+	wantMemory := []int{7, 7, 6}
+	for i := 0; i < 3; i++ {
+		vcpus, memory := LeasePoolShare(lease, i)
+		if vcpus != wantVCpus[i] {
+			t.Errorf("LeasePoolShare index %d vcpus = %d, want %d", i, vcpus, wantVCpus[i])
+		}
+		if memory != wantMemory[i] {
+			t.Errorf("LeasePoolShare index %d memory = %d, want %d", i, memory, wantMemory[i])
+		}
+	}
+
+	// An index at or beyond the pool count clamps to the last pool's share.
+	vcpus, memory := LeasePoolShare(lease, 5)
+	if vcpus != wantVCpus[2] || memory != wantMemory[2] {
+		t.Errorf("LeasePoolShare out-of-range index = (%d, %d), want (%d, %d)", vcpus, memory, wantVCpus[2], wantMemory[2])
+	}
+
+	// Pools unset defaults to 1: the single pool gets the full amount.
+	singlePoolLease := &v1.Lease{Spec: v1.LeaseSpec{VCpus: 16, Memory: 32}}
+	vcpus, memory = LeasePoolShare(singlePoolLease, 0)
+	if vcpus != 16 || memory != 32 {
+		t.Errorf("LeasePoolShare with Pools unset = (%d, %d), want (16, 32)", vcpus, memory)
+	}
+}
+
+func TestLeaseNextPoolShare(t *testing.T) {
+	lease := &v1.Lease{
+		Spec: v1.LeaseSpec{Pools: 2, VCpus: 21, Memory: 41},
+	}
+
+	// No pools assigned yet: next share is index 0 (gets the remainder).
+	vcpus, memory := LeaseNextPoolShare(lease)
+	if vcpus != 11 || memory != 21 {
+		t.Errorf("LeaseNextPoolShare with no owned pools = (%d, %d), want (11, 21)", vcpus, memory)
+	}
+
+	// One pool already assigned: next share is index 1.
+	lease.OwnerReferences = append(lease.OwnerReferences, metav1.OwnerReference{Kind: "Pool", Name: "pool1"})
+	vcpus, memory = LeaseNextPoolShare(lease)
+	if vcpus != 10 || memory != 20 {
+		t.Errorf("LeaseNextPoolShare with 1 owned pool = (%d, %d), want (10, 20)", vcpus, memory)
+	}
+}
+
+func TestGetFittingPoolsMultiPoolSplitsResources(t *testing.T) {
+	// Lease wants 2 pools totaling 20 vCPUs / 40GB memory, i.e. 10 vCPUs / 20GB
+	// per pool. Neither pool has enough to satisfy the full 20/40 total, but
+	// both have enough for their 10/20 share.
+	lease := &v1.Lease{
+		Spec: v1.LeaseSpec{Pools: 2, VCpus: 20, Memory: 40},
+	}
+	candidatePools := []*v1.Pool{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "pool1"},
+			Spec:       v1.PoolSpec{VCpus: 100},
+			Status:     v1.PoolStatus{VCpusAvailable: 15, MemoryAvailable: 25},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "pool2"},
+			Spec:       v1.PoolSpec{VCpus: 100},
+			Status:     v1.PoolStatus{VCpusAvailable: 15, MemoryAvailable: 25},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "pool-too-small"},
+			Spec:       v1.PoolSpec{VCpus: 100},
+			Status:     v1.PoolStatus{VCpusAvailable: 5, MemoryAvailable: 25},
+		},
+	}
+
+	fittingPools, poolResults := GetFittingPools(lease, candidatePools, nil, nil)
+
+	if len(fittingPools) != 2 {
+		t.Fatalf("GetFittingPools() returned %d fitting pools, want 2", len(fittingPools))
+	}
+	for _, pool := range fittingPools {
+		if pool.Name == "pool-too-small" {
+			t.Errorf("pool-too-small should not fit the 10 vCPU per-pool share")
+		}
+	}
+
+	for _, result := range poolResults {
+		if result.Pool.Name == "pool-too-small" && result.MatchResults != PoolInsufficientVCPU {
+			t.Errorf("pool-too-small rejection reason = %q, want %q", result.MatchResults, PoolInsufficientVCPU)
+		}
+	}
+}
+
 func TestGetVCentersInUse(t *testing.T) {
 	tests := []struct {
 		name          string

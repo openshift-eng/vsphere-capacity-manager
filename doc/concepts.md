@@ -14,7 +14,7 @@ A **Lease** is a request for resources: vCPU, memory, number of networks (today 
 
 When the operator can place the lease, **status.phase** becomes **Fulfilled** and status carries failure-domain and env information consumers use to build install configs.
 
-For **multiple failure domains** (e.g. multiple vSphere clusters), create **one Lease per domain**.
+For **multiple failure domains** (e.g. multiple vSphere clusters), either create **one Lease per domain**, or set **`spec.pools`** (default `1`) to have a single Lease span that many pools. With `spec.pools > 1`, `spec.vcpus` and `spec.memory` are the lease's **total** request and are split as evenly as possible across the assigned pools — each pool only needs to supply its share, not the full amount. Per-pool details land in `status.poolInfo` (one entry per assigned pool) and `status.envVarsMap` (keyed by pool name); the singular `status.envVars` and inline failure-domain fields are deprecated and only reflect the first pool.
 
 ## Network
 

@@ -76,9 +76,13 @@ type Lease struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.min__dash__vcenters) || self.min__dash__vcenters <= self.pools",message="min-vcenters must not exceed pools: each pool resides on exactly one vCenter"
 // +kubebuilder:validation:XValidation:rule="!has(self.min__dash__vcenters) || !has(self.vcenters) || self.vcenters == 0 || self.min__dash__vcenters <= self.vcenters",message="min-vcenters must not exceed the vcenters cap"
 type LeaseSpec struct {
-	// VCpus is the number of virtual CPUs allocated for this lease
+	// VCpus is the total number of virtual CPUs allocated for this lease. When
+	// Pools is greater than 1, this total is split as evenly as possible across
+	// the assigned pools, so each pool is only required to supply its share.
 	VCpus int `json:"vcpus,omitempty"`
-	// Memory is the amount of memory in GB allocated for this lease
+	// Memory is the total amount of memory in GB allocated for this lease. When
+	// Pools is greater than 1, this total is split as evenly as possible across
+	// the assigned pools, so each pool is only required to supply its share.
 	Memory int `json:"memory,omitempty"`
 	// Pools is the number of pools to return for this lease
 	// +kubebuilder:validation:Minimum=1

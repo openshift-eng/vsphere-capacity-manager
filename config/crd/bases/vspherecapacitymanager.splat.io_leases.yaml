@@ -53,8 +53,10 @@ spec:
                   with this lease
                 type: string
               memory:
-                description: Memory is the amount of memory in GB allocated for this
-                  lease
+                description: Memory is the total amount of memory in GB allocated
+                  for this lease. When Pools is greater than 1, this total is split
+                  as evenly as possible across the assigned pools, so each pool is
+                  only required to supply its share.
                 type: integer
               min-vcenters:
                 description: 'MinVCenters is the minimum number of distinct vCenters
@@ -159,8 +161,10 @@ spec:
                 minimum: 0
                 type: integer
               vcpus:
-                description: VCpus is the number of virtual CPUs allocated for this
-                  lease
+                description: VCpus is the total number of virtual CPUs allocated for
+                  this lease. When Pools is greater than 1, this total is split as
+                  evenly as possible across the assigned pools, so each pool is only
+                  required to supply its share.
                 type: integer
             required:
             - networks

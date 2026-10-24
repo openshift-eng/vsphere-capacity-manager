@@ -39,17 +39,6 @@ func init() {
 	}
 }
 
-// DoesLeaseHavePool returns true if a lease already has an associated pool
-func DoesLeaseHavePool(lease *v1.Lease) *metav1.OwnerReference {
-	var ref *metav1.OwnerReference
-	for _, ownerRef := range lease.OwnerReferences {
-		if ownerRef.Kind == "Pool" {
-			ref = &ownerRef
-		}
-	}
-	return ref
-}
-
 // GetLeasePoolRefs returns all pool owner references for a lease
 func GetLeasePoolRefs(lease *v1.Lease) []metav1.OwnerReference {
 	var poolRefs []metav1.OwnerReference
@@ -59,6 +48,71 @@ func GetLeasePoolRefs(lease *v1.Lease) []metav1.OwnerReference {
 		}
 	}
 	return poolRefs
+}
+
+// LeaseRequiredPools returns the number of pools a lease requires, defaulting to 1.
+func LeaseRequiredPools(lease *v1.Lease) int {
+	if lease.Spec.Pools < 1 {
+		return 1
+	}
+	return lease.Spec.Pools
+}
+
+// ShareAt returns the share of total at the given 0-based index when total is
+// split as evenly as possible across n parts, without allocating an n-length
+// slice. Any remainder from an uneven split goes to the earliest indices.
+// Equivalent to SplitResourceAcrossPools(total, n)[index] for 0 <= index < n,
+// but safe to call with an arbitrarily large n (e.g. a user-controlled
+// Spec.Pools with no upper bound) since it does O(1) work regardless of n.
+func ShareAt(total, n, index int) int {
+	if n <= 0 {
+		return 0
+	}
+	if index >= n {
+		index = n - 1
+	}
+	if index < 0 {
+		index = 0
+	}
+	base := total / n
+	remainder := total % n
+	if index < remainder {
+		return base + 1
+	}
+	return base
+}
+
+// SplitResourceAcrossPools divides total as evenly as possible across n pools,
+// returning an n-length slice whose values sum to total. Any remainder from an
+// uneven split is given, one unit at a time, to the earliest pools in the
+// slice. n is expected to be small (e.g. a lease's actual assigned pool
+// count); for a single share, prefer the allocation-free ShareAt.
+func SplitResourceAcrossPools(total, n int) []int {
+	if n <= 0 {
+		return nil
+	}
+	shares := make([]int, n)
+	for i := range shares {
+		shares[i] = ShareAt(total, n, i)
+	}
+	return shares
+}
+
+// LeasePoolShare returns the vCPU and memory this lease requires from the pool
+// at the given 0-based assignment index, out of lease.Spec.Pools pools total.
+// Spec.VCpus and Spec.Memory are split evenly across the assigned pools; any
+// remainder from an uneven split goes to the earliest-assigned pools. Safe to
+// call regardless of how large Spec.Pools is, since it never allocates a
+// Spec.Pools-sized slice.
+func LeasePoolShare(lease *v1.Lease, poolIndex int) (vcpus int, memory int) {
+	n := LeaseRequiredPools(lease)
+	return ShareAt(lease.Spec.VCpus, n, poolIndex), ShareAt(lease.Spec.Memory, n, poolIndex)
+}
+
+// LeaseNextPoolShare returns the vCPU and memory share required from the next
+// pool about to be assigned to lease, based on how many pools it already owns.
+func LeaseNextPoolShare(lease *v1.Lease) (vcpus int, memory int) {
+	return LeasePoolShare(lease, len(GetLeasePoolRefs(lease)))
 }
 
 // DoesLeaseHaveAllPools checks if a lease has all required pools assigned

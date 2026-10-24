@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"sort"
 	"testing"
+	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "github.com/openshift-splat-team/vsphere-capacity-manager/pkg/apis/vspherecapacitymanager.splat.io/v1"
+	"github.com/openshift-splat-team/vsphere-capacity-manager/pkg/utils"
 )
 
 func setupTestNetworks(nets map[string]*v1.Network) func() {
@@ -1075,6 +1077,205 @@ func TestReconcilePoolStatesNetworkTypeSplit(t *testing.T) {
 	}
 }
 
+func TestReconcilePoolStatesSplitsResourcesAcrossMultiplePools(t *testing.T) {
+	defer setupTestNetworks(map[string]*v1.Network{})()
+	defer setupTestPools(map[string]*v1.Pool{
+		"default/pool1": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool1", Namespace: "default"},
+			Spec: v1.PoolSpec{
+				VCpus:           100,
+				Memory:          200,
+				OverCommitRatio: "1.0",
+			},
+		},
+		"default/pool2": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool2", Namespace: "default"},
+			Spec: v1.PoolSpec{
+				VCpus:           100,
+				Memory:          200,
+				OverCommitRatio: "1.0",
+			},
+		},
+	})()
+	defer setupTestLeases(map[string]*v1.Lease{
+		"default/lease1": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "lease1",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Pool", Name: "pool1"},
+					{Kind: "Pool", Name: "pool2"},
+				},
+			},
+			// 21/2 and 41/2 split unevenly: pool1 (assigned first) gets the remainder.
+			Spec: v1.LeaseSpec{Pools: 2, VCpus: 21, Memory: 41},
+		},
+	})()
+
+	outList := reconcilePoolStates()
+	if len(outList) != 2 {
+		t.Fatalf("expected 2 pools, got %d", len(outList))
+	}
+
+	byName := make(map[string]*v1.Pool, len(outList))
+	for _, pool := range outList {
+		byName[pool.Name] = pool
+	}
+
+	pool1, pool2 := byName["pool1"], byName["pool2"]
+
+	if pool1.Status.VCpusAvailable != 89 {
+		t.Errorf("pool1 VCpusAvailable = %d, want 89 (100 - 11)", pool1.Status.VCpusAvailable)
+	}
+	if pool1.Status.MemoryAvailable != 179 {
+		t.Errorf("pool1 MemoryAvailable = %d, want 179 (200 - 21)", pool1.Status.MemoryAvailable)
+	}
+	if pool2.Status.VCpusAvailable != 90 {
+		t.Errorf("pool2 VCpusAvailable = %d, want 90 (100 - 10)", pool2.Status.VCpusAvailable)
+	}
+	if pool2.Status.MemoryAvailable != 180 {
+		t.Errorf("pool2 MemoryAvailable = %d, want 180 (200 - 20)", pool2.Status.MemoryAvailable)
+	}
+
+	// The two pools' deductions must sum to the lease's total request, not be
+	// charged in full against each pool independently.
+	totalVCpusUsed := (pool1.Spec.VCpus - pool1.Status.VCpusAvailable) + (pool2.Spec.VCpus - pool2.Status.VCpusAvailable)
+	if totalVCpusUsed != 21 {
+		t.Errorf("total vCPUs deducted across pools = %d, want 21", totalVCpusUsed)
+	}
+	totalMemoryUsed := (pool1.Spec.Memory - pool1.Status.MemoryAvailable) + (pool2.Spec.Memory - pool2.Status.MemoryAvailable)
+	if totalMemoryUsed != 41 {
+		t.Errorf("total memory deducted across pools = %d, want 41", totalMemoryUsed)
+	}
+
+	if pool1.Status.LeaseCount != 1 || pool2.Status.LeaseCount != 1 {
+		t.Errorf("expected LeaseCount = 1 on both pools, got pool1=%d pool2=%d", pool1.Status.LeaseCount, pool2.Status.LeaseCount)
+	}
+}
+
+// TestReconcilePoolStatesMoreOwnedPoolsThanSpecPools covers a lease that owns
+// more pools (via OwnerReferences) than its current Spec.Pools declares - e.g.
+// Spec.Pools was lowered after pools were already assigned. The split must use
+// the actual owned pool count as the denominator, not clamp every pool beyond
+// Spec.Pools to the last pool's share, which would otherwise charge the
+// lease's total more than once.
+func TestReconcilePoolStatesMoreOwnedPoolsThanSpecPools(t *testing.T) {
+	defer setupTestNetworks(map[string]*v1.Network{})()
+	defer setupTestPools(map[string]*v1.Pool{
+		"default/pool1": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool1", Namespace: "default"},
+			Spec:       v1.PoolSpec{VCpus: 100, Memory: 200, OverCommitRatio: "1.0"},
+		},
+		"default/pool2": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool2", Namespace: "default"},
+			Spec:       v1.PoolSpec{VCpus: 100, Memory: 200, OverCommitRatio: "1.0"},
+		},
+		"default/pool3": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool3", Namespace: "default"},
+			Spec:       v1.PoolSpec{VCpus: 100, Memory: 200, OverCommitRatio: "1.0"},
+		},
+	})()
+	defer setupTestLeases(map[string]*v1.Lease{
+		"default/lease1": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "lease1",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Pool", Name: "pool1"},
+					{Kind: "Pool", Name: "pool2"},
+					{Kind: "Pool", Name: "pool3"},
+				},
+			},
+			// Declares 2 pools but actually owns 3 (e.g. Spec.Pools was lowered after
+			// the 3rd pool was already assigned).
+			Spec: v1.LeaseSpec{Pools: 2, VCpus: 20, Memory: 40},
+		},
+	})()
+
+	outList := reconcilePoolStates()
+	if len(outList) != 3 {
+		t.Fatalf("expected 3 pools, got %d", len(outList))
+	}
+
+	byName := make(map[string]*v1.Pool, len(outList))
+	for _, pool := range outList {
+		byName[pool.Name] = pool
+	}
+
+	totalVCpusUsed := 0
+	totalMemoryUsed := 0
+	for _, name := range []string{"pool1", "pool2", "pool3"} {
+		p := byName[name]
+		totalVCpusUsed += p.Spec.VCpus - p.Status.VCpusAvailable
+		totalMemoryUsed += p.Spec.Memory - p.Status.MemoryAvailable
+	}
+
+	// Split across the actual 3 owned pools, not Spec.Pools=2: must still sum to
+	// exactly the lease's total (20/40), not 2x or 3x that from double-charging.
+	if totalVCpusUsed != 20 {
+		t.Errorf("total vCPUs deducted across pools = %d, want 20", totalVCpusUsed)
+	}
+	if totalMemoryUsed != 40 {
+		t.Errorf("total memory deducted across pools = %d, want 40", totalMemoryUsed)
+	}
+}
+
+// TestReconcilePoolStatesHugeSpecPoolsDoesNotAllocateProportionally is a
+// regression test for a DoS: Spec.Pools has no upper bound (the CRD only
+// validates Minimum=1), so a lease that already owns a pool but has had
+// Spec.Pools edited to an enormous value must not make reconcilePoolStates
+// allocate, or take time, proportional to Spec.Pools.
+func TestReconcilePoolStatesHugeSpecPoolsDoesNotAllocateProportionally(t *testing.T) {
+	defer setupTestNetworks(map[string]*v1.Network{})()
+	defer setupTestPools(map[string]*v1.Pool{
+		"default/pool1": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "pool1", Namespace: "default"},
+			Spec:       v1.PoolSpec{VCpus: 100, Memory: 200, OverCommitRatio: "1.0"},
+		},
+	})()
+	defer setupTestLeases(map[string]*v1.Lease{
+		"default/lease1": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "lease1",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Pool", Name: "pool1"},
+				},
+			},
+			// Spec.Pools was edited to an enormous value after this lease already
+			// owned pool1. Must not allocate ~Spec.Pools-sized slices for this.
+			Spec: v1.LeaseSpec{Pools: 2_000_000_000, VCpus: 96, Memory: 384},
+		},
+	})()
+
+	done := make(chan []*v1.Pool, 1)
+	go func() { done <- reconcilePoolStates() }()
+
+	select {
+	case outList := <-done:
+		if len(outList) != 1 {
+			t.Fatalf("expected 1 pool, got %d", len(outList))
+		}
+		pool1 := outList[0]
+		// pool1 is index 0 of 2,000,000,000 shares of 96/384: gets the +1
+		// remainder (96 and 384 are both < 2e9), so 1 vCPU / 1 GB is deducted.
+		if pool1.Status.VCpusAvailable != 99 {
+			t.Errorf("pool1 VCpusAvailable = %d, want 99 (100 - 1)", pool1.Status.VCpusAvailable)
+		}
+		if pool1.Status.MemoryAvailable != 199 {
+			t.Errorf("pool1 MemoryAvailable = %d, want 199 (200 - 1)", pool1.Status.MemoryAvailable)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reconcilePoolStates did not return within 2s - likely allocating or looping proportional to Spec.Pools")
+	}
+}
+
 func TestUpdateLeaseMetrics(t *testing.T) {
 	oldLeases := leases
 	oldPools := pools
@@ -1118,6 +1319,94 @@ func TestUpdateLeaseMetrics(t *testing.T) {
 	age := testutil.ToFloat64(LeaseAgeSeconds.WithLabelValues("default", "test-lease", "pool1", "multi-tenant"))
 	if age < 0 || age > 5 {
 		t.Errorf("expected lease age near 0 seconds, got %v", age)
+	}
+}
+
+// TestIncrementLeasesInUseOnFulfillment is a regression test for the
+// multi-pool leases_in_use mis-attribution bug: fulfilling a lease spanning N
+// pools must Add(1) to every pool it owns, not just the first (as it once
+// did).
+func TestIncrementLeasesInUseOnFulfillment(t *testing.T) {
+	const namespace = "leases-in-use-increment-test"
+	pool1 := &v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "liu-inc-pool-1", Namespace: namespace}}
+	pool2 := &v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "liu-inc-pool-2", Namespace: namespace}}
+
+	before1 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool1.Name))
+	before2 := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool2.Name))
+
+	incrementLeasesInUse(namespace, []*v1.Pool{pool1, pool2})
+
+	if got := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool1.Name)); got != before1+1 {
+		t.Errorf("pool1 leases_in_use after fulfill = %v, want %v", got, before1+1)
+	}
+	if got := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, pool2.Name)); got != before2+1 {
+		t.Errorf("pool2 leases_in_use after fulfill = %v, want %v", got, before2+1)
+	}
+}
+
+// TestSetLeasesInUseFromPoolCountsAfterLeaseDeletion is a regression test for
+// a staleness bug: a PARTIAL lease (pool refs assigned, but never
+// incrementLeasesInUse'd - that only runs on the Fulfilled transition) still
+// contributes to a pool's Status.LeaseCount via reconcilePoolStates. Deleting
+// it must immediately correct the leases_in_use gauge via
+// setLeasesInUseFromPoolCounts, not leave it stale-high until some unrelated
+// lease event happens to trigger that pool's own async reconcile. Also covers
+// a multi-pool lease, where both owned pools must independently converge to 0
+// - not just the first or last pool reference.
+func TestSetLeasesInUseFromPoolCountsAfterLeaseDeletion(t *testing.T) {
+	const namespace = "default"
+	defer setupTestNetworks(map[string]*v1.Network{})()
+	defer setupTestPools(map[string]*v1.Pool{
+		"default/liu-del-pool-1": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "liu-del-pool-1", Namespace: namespace},
+			Spec:       v1.PoolSpec{VCpus: 100, Memory: 200, OverCommitRatio: "1.0"},
+		},
+		"default/liu-del-pool-2": {
+			TypeMeta:   metav1.TypeMeta{Kind: "Pool"},
+			ObjectMeta: metav1.ObjectMeta{Name: "liu-del-pool-2", Namespace: namespace},
+			Spec:       v1.PoolSpec{VCpus: 100, Memory: 200, OverCommitRatio: "1.0"},
+		},
+	})()
+
+	leasesMap := map[string]*v1.Lease{
+		"default/liu-del-lease": {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "liu-del-lease",
+				Namespace: namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Pool", Name: "liu-del-pool-1"},
+					{Kind: "Pool", Name: "liu-del-pool-2"},
+				},
+			},
+			Spec: v1.LeaseSpec{Pools: 2, VCpus: 10, Memory: 20},
+			// PARTIAL, not Fulfilled: never went through incrementLeasesInUse.
+			Status: v1.LeaseStatus{Phase: v1.PHASE_PARTIAL},
+		},
+	}
+	defer setupTestLeases(leasesMap)()
+
+	// reconcilePoolStates counts this PARTIAL lease toward LeaseCount regardless
+	// of phase; setting from that makes it visible on both pools even though it
+	// was never Add()'d.
+	setLeasesInUseFromPoolCounts(reconcilePoolStates())
+	if got := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, "liu-del-pool-1")); got != 1 {
+		t.Fatalf("liu-del-pool-1 leases_in_use with partial lease assigned = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, "liu-del-pool-2")); got != 1 {
+		t.Fatalf("liu-del-pool-2 leases_in_use with partial lease assigned = %v, want 1", got)
+	}
+
+	// Delete it (mirrors LeaseReconciler.Reconcile's deletion branch) and
+	// recompute: both pools must drop back to 0 immediately, not just one.
+	delete(leasesMap, "default/liu-del-lease")
+	setLeasesInUseFromPoolCounts(reconcilePoolStates())
+
+	if got := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, "liu-del-pool-1")); got != 0 {
+		t.Errorf("liu-del-pool-1 leases_in_use after delete = %v, want 0", got)
+	}
+	if got := testutil.ToFloat64(LeasesInUse.WithLabelValues(namespace, "liu-del-pool-2")); got != 0 {
+		t.Errorf("liu-del-pool-2 leases_in_use after delete = %v, want 0", got)
 	}
 }
 
@@ -2166,25 +2455,15 @@ func TestLeaseVCenterPoolAvailability(t *testing.T) {
 					t.Skip("Test case is for pre-assignment filtering")
 				} else if lease.Spec.VCenters > 0 && lease.Spec.VCenters < tt.requiredPools && len(assignedPools) == 0 {
 					// This is the special case we're testing: VCenters < Pools
-					// Use the same algorithm as production code
+					// Reuse the real production filtering (utils.GetFittingPools) instead of a
+					// hand-rolled duplicate, so this test tracks capacity-matching changes (e.g.
+					// per-pool resource splitting for multi-pool leases) automatically.
+					fittingPools, _ := utils.GetFittingPools(lease, tt.availablePools, nil, nil)
 					fittingPoolsPerVCenter := make(map[string][]*v1.Pool)
-					for _, p := range tt.availablePools {
-						if p.Spec.Server == "" {
-							continue
+					for _, p := range fittingPools {
+						if p.Spec.Server != "" {
+							fittingPoolsPerVCenter[p.Spec.Server] = append(fittingPoolsPerVCenter[p.Spec.Server], p)
 						}
-						if p.Spec.NoSchedule {
-							continue
-						}
-						if p.Spec.Exclude && lease.Spec.RequiredPool != p.ObjectMeta.Name {
-							continue
-						}
-						if len(lease.Spec.RequiredPool) > 0 && lease.Spec.RequiredPool != p.ObjectMeta.Name {
-							continue
-						}
-						if int(p.Status.VCpusAvailable) < lease.Spec.VCpus || int(p.Status.MemoryAvailable) < lease.Spec.Memory {
-							continue
-						}
-						fittingPoolsPerVCenter[p.Spec.Server] = append(fittingPoolsPerVCenter[p.Spec.Server], p)
 					}
 
 					// Build sorted list of vCenters by pool count (descending)

@@ -193,34 +193,68 @@ func reconcilePoolStates() []*v1.Pool {
 
 	networksInUse := make(map[string]map[string]string)
 
+	// Precompute each lease's per-pool vCPU/memory share once, instead of
+	// recomputing it (and reallocating GetLeasePoolRefs' slice) for every
+	// (pool, lease) pair in the loop below. If a lease somehow owns more pools
+	// than it currently declares needing (e.g. Spec.Pools was lowered after
+	// assignment), split across the actual owned count rather than clamping
+	// every pool beyond Spec.Pools to the last share, which would otherwise
+	// double-charge those pools against the lease's total. Uses utils.ShareAt
+	// (O(1) per pool) rather than materializing a Spec.Pools-sized slice:
+	// Spec.Pools has no upper bound, so a lease edited to request an enormous
+	// pool count must not make this allocate proportionally to it.
+	type poolShare struct {
+		vcpus  int
+		memory int
+	}
+	leasePoolShares := make(map[*v1.Lease]map[string]poolShare, len(leases))
+	for _, lease := range leases {
+		poolRefs := utils.GetLeasePoolRefs(lease)
+		if len(poolRefs) == 0 {
+			continue
+		}
+		n := utils.LeaseRequiredPools(lease)
+		if len(poolRefs) > n {
+			n = len(poolRefs)
+		}
+
+		shares := make(map[string]poolShare, len(poolRefs))
+		for i, ref := range poolRefs {
+			shares[ref.Name] = poolShare{
+				vcpus:  utils.ShareAt(lease.Spec.VCpus, n, i),
+				memory: utils.ShareAt(lease.Spec.Memory, n, i),
+			}
+		}
+		leasePoolShares[lease] = shares
+	}
+
 	for poolName, pool := range pools {
 		vcpus := 0
 		memory := 0
 		leaseCount := 0
 
 		for _, lease := range leases {
-			for _, ownerRef := range lease.OwnerReferences {
-				if ownerRef.Kind == pool.Kind && ownerRef.Name == pool.Name {
-					vcpus += lease.Spec.VCpus
-					memory += lease.Spec.Memory
-					leaseCount++
+			share, ok := leasePoolShares[lease][pool.Name]
+			if !ok {
+				continue
+			}
+			vcpus += share.vcpus
+			memory += share.memory
+			leaseCount++
 
-					var serverNetworks map[string]string
-					var exists bool
+			var serverNetworks map[string]string
+			var exists bool
 
-					dc, pod := getIBMDatacenterAndPod(lease.Status.Server)
-					dcId := fmt.Sprintf("dcid-%s-%s", dc, pod)
-					if serverNetworks, exists = networksInUse[dcId]; !exists {
-						serverNetworks = make(map[string]string)
-						networksInUse[dcId] = serverNetworks
-					}
+			dc, pod := getIBMDatacenterAndPod(lease.Status.Server)
+			dcId := fmt.Sprintf("dcid-%s-%s", dc, pod)
+			if serverNetworks, exists = networksInUse[dcId]; !exists {
+				serverNetworks = make(map[string]string)
+				networksInUse[dcId] = serverNetworks
+			}
 
-					for _, networkPath := range lease.Status.Topology.Networks {
-						_, networkName := path.Split(networkPath)
-						serverNetworks[networkName] = networkName
-					}
-					break
-				}
+			for _, networkPath := range lease.Status.Topology.Networks {
+				_, networkName := path.Split(networkPath)
+				serverNetworks[networkName] = networkName
 			}
 		}
 
@@ -343,6 +377,33 @@ func (l *LeaseReconciler) triggerLeaseUpdates(ctx context.Context, networkType v
 		if err != nil {
 			log.Printf("error updating lease %s annotations: %v", oldestLease.Name, err)
 		}
+	}
+}
+
+// incrementLeasesInUse adds 1 to the leases_in_use gauge for each pool a
+// freshly-fulfilled lease is assigned to.
+func incrementLeasesInUse(namespace string, assignedPools []*v1.Pool) {
+	for _, pool := range assignedPools {
+		LeasesInUse.With(prometheus.Labels{
+			"namespace": namespace,
+			"pool":      pool.Name,
+		}).Add(1)
+	}
+}
+
+// setLeasesInUseFromPoolCounts sets the leases_in_use gauge for every given
+// pool to its freshly-recomputed Status.LeaseCount, the same authoritative
+// value PoolReconciler.Reconcile eventually converges each pool to. Used
+// instead of a relative Dec() on lease deletion, since LeaseCount already
+// reflects PARTIAL leases (counted by reconcilePoolStates) as well as
+// Fulfilled ones, and an absolute Set() is correct regardless of whatever the
+// gauge's prior value was.
+func setLeasesInUseFromPoolCounts(pools []*v1.Pool) {
+	for _, pool := range pools {
+		LeasesInUse.With(prometheus.Labels{
+			"namespace": pool.Namespace,
+			"pool":      pool.Name,
+		}).Set(float64(pool.Status.LeaseCount))
 	}
 }
 
@@ -869,15 +930,16 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, fmt.Errorf("error dropping finalizers from lease: %w", err)
 		}
 
-		if ownRef := utils.DoesLeaseHavePool(lease); ownRef != nil {
-			promLabels["pool"] = ownRef.Name
-		}
-
 		delete(leases, leaseKey)
-		if len(promLabels) >= 2 {
-			LeasesInUse.With(promLabels).Dec()
-		}
-		reconcilePoolStates()
+
+		// reconcilePoolStates recomputes LeaseCount from the leases map, which no
+		// longer includes this one; set the gauge from that authoritative count
+		// immediately rather than guessing a relative adjustment. A PARTIAL lease
+		// (pool refs assigned, but never incrementLeasesInUse'd - that only runs on
+		// the Fulfilled transition) still contributes to LeaseCount, so deleting one
+		// needs exactly this to avoid leaving the gauge stale-high until some other
+		// lease's event happens to trigger this pool's own async reconcile.
+		setLeasesInUseFromPoolCounts(reconcilePoolStates())
 		l.triggerPoolUpdates(ctx)
 		l.triggerLeaseUpdates(ctx, lease.Spec.NetworkType)
 		updateLeaseMetrics()
@@ -1710,8 +1772,7 @@ func (l *LeaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	if lease.Status.Phase == v1.PHASE_FULFILLED {
-		promLabels["pool"] = pool.Name
-		LeasesInUse.With(promLabels).Add(1)
+		incrementLeasesInUse(promLabels["namespace"], assignedPools)
 
 		if pool.Annotations == nil {
 			pool.Annotations = make(map[string]string)
